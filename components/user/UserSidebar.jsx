@@ -25,7 +25,7 @@ export default function UserSidebar() {
 
   const doLogout = () => {
     logout();
-    router.push("/"); // Redirect to root (LoginPage)
+    router.push("/");
   };
 
   const linkStyle = (active) => ({
@@ -78,18 +78,33 @@ export default function UserSidebar() {
           flexShrink: 0,
         }}
       >
-        <Image
-          src="/logo.png"
-          alt="Mirmira Logo"
+        <div
           style={{
             width: 42,
             height: 42,
             borderRadius: "50%",
-            objectFit: "cover",
             border: `2.5px solid ${GOLD.M}`,
             background: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+            overflow: "hidden",
+            position: "relative", // required for fill
           }}
-        />
+        >
+          <Image
+            src="/logo.png"
+            alt="Mirmira Logo"
+            fill
+            sizes="42px"
+            style={{
+              objectFit: "cover",
+              borderRadius: "50%",
+            }}
+          />
+        </div>
+
         <div>
           <div
             style={{
@@ -200,6 +215,7 @@ export default function UserSidebar() {
             marginBottom: 6,
           }}
         >
+          {/* Avatar container — position:relative required for fill */}
           <div
             style={{
               width: 34,
@@ -221,9 +237,9 @@ export default function UserSidebar() {
               <Image
                 src={photoUrl}
                 alt={fullName}
+                fill
+                sizes="34px"
                 style={{
-                  width: "100%",
-                  height: "100%",
                   objectFit: "cover",
                   borderRadius: "50%",
                 }}
@@ -310,7 +326,7 @@ export default function UserSidebar() {
   );
 }
 
-/* Icons */
+/* ── Icons ── */
 function IcoHome() {
   return (
     <svg
