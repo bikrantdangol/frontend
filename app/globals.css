@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+:root {
+  --background: #F4F7F4;
+  --foreground: #0A2E12;
+}
+
+body {
+  background: #F4F7F4;
+  color: #0A2E12;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
