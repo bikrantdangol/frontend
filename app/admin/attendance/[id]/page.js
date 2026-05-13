@@ -58,15 +58,24 @@ const StatusBadge = ({ status, isLate }) => {
 };
 
 /**
- * Build full calendar for the month from raw backend records:
- * - Skip days before user joined
- * - Skip future days
- * - Use real backend record where available (deduped, prefer checkIn)
- * - Working days with no record → absent
- * - Saturday with no record → weekend
- * - Backend holiday records preserved
+ * Build full calendar for the month from raw backend records.
+ *
+ * Problem the old code had: if the backend returns 0 records for the selected
+ * month (employee has no punches yet), keys.length === 0 → early return [] and
+ * the table stays empty forever.  Instead we now accept an explicit
+ * { year, month } pair so we can always fill the month grid regardless of
+ * whether the backend returned anything.
+ *
+ * Rules:
+ *  - Skip days before user joined
+ *  - Skip future days
+ *  - Use real backend record where available (deduped, prefer record with checkIn)
+ *  - Working days with no record → absent
+ *  - Sunday (idx 0) with no record → weekend   (Nepal treats Sunday as day-off)
+ *  - Saturday (idx 6) with no record → weekend
+ *  - Backend holiday / on-leave / half-day records preserved as-is
  */
-const buildFullMonthRecords = (rawRecords, joinDate) => {
+const buildFullMonthRecords = (rawRecords, joinDate, adYear, adMonth) => {
   const now = new Date();
   now.setHours(23, 59, 59, 999);
 
@@ -81,18 +90,32 @@ const buildFullMonthRecords = (rawRecords, joinDate) => {
     if (!byDate[key] || (!byDate[key].checkIn && r.checkIn)) byDate[key] = r;
   });
 
+  // Determine iteration window:
+  // • If the backend gave us records, use their date range.
+  // • If empty but we know the AD year+month, iterate the whole calendar month.
+  // • Otherwise fall back to today only.
+  let firstDt, lastDt;
   const keys = Object.keys(byDate).sort();
-  if (keys.length === 0) return [];
 
-  const firstDt = new Date(keys[0]);
-  const lastDt  = new Date(keys[keys.length - 1]);
+  if (keys.length > 0) {
+    firstDt = new Date(keys[0]);
+    lastDt  = new Date(keys[keys.length - 1]);
+  } else if (adYear && adMonth) {
+    firstDt = new Date(adYear, adMonth - 1, 1);          // 1st of month
+    lastDt  = new Date(adYear, adMonth, 0);              // last day of month
+  } else {
+    return [];
+  }
 
-  const result  = [];
-  const cursor  = new Date(firstDt);
+  // Clamp lastDt to today so we don't render future rows
+  if (lastDt > now) lastDt = new Date(now);
+
+  const result = [];
+  const cursor = new Date(firstDt);
 
   while (cursor <= lastDt) {
     const key    = cursor.toISOString().slice(0, 10);
-    const dayIdx = cursor.getDay();
+    const dayIdx = cursor.getDay(); // 0=Sun … 6=Sat
 
     // Skip future
     if (cursor > now) { cursor.setDate(cursor.getDate() + 1); continue; }
@@ -103,13 +126,14 @@ const buildFullMonthRecords = (rawRecords, joinDate) => {
     if (byDate[key]) {
       result.push({ ...byDate[key] });
     } else {
-      // Saturday = weekend; all other days = working → absent
+      // Sunday (0) & Saturday (6) → weekend; everything else → absent
+      const isWeekend = dayIdx === 0 || dayIdx === 6;
       result.push({
         _synthetic:      true,
         date:            cursor.toISOString(),
         nepaliDate:      null,
         dayName:         DAY_NAMES[dayIdx],
-        status:          dayIdx === 6 ? "weekend" : "absent",
+        status:          isWeekend ? "weekend" : "absent",
         checkIn:         null,
         checkOut:        null,
         isLate:          false,
@@ -129,7 +153,7 @@ const buildFullMonthRecords = (rawRecords, joinDate) => {
 
 export default function AdminUserAttendanceDetail() {
   const params       = useParams();
-  const userId       = params.userId;           // route: /admin/attendance/[userId]
+  const userId       = params.userId;
   const searchParams = useSearchParams();
   const { token }    = useApp();
   const today        = getTodayBS();
@@ -144,6 +168,7 @@ export default function AdminUserAttendanceDetail() {
   const [selectedMonth,     setSelectedMonth]     = useState(initMonth);
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [loading,           setLoading]           = useState(false);
+  const [adWindow,          setAdWindow]          = useState(null); // { year, month } in AD
   const [stats, setStats] = useState({ present: 0, late: 0, absent: 0, rate: 0 });
 
   // ── 1. Fetch user once ────────────────────────────────────────
@@ -158,12 +183,18 @@ export default function AdminUserAttendanceDetail() {
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
-        // Handle both { user: {...} } and the user object directly
-        const u = json.user || json.data || json;
-        if (u && (u._id || u.id)) {
+
+        // ── FIX: accept any response shape ──────────────────────
+        // Backend returns { user: {...} }  →  json.user
+        // Some endpoints return { data: {...} } or the object directly.
+        // We no longer gate on _id / id being present because Mongoose
+        // virtuals can expose `id` but hide `_id` depending on toJSON config.
+        const u = json.user ?? json.data ?? json;
+
+        if (u && typeof u === "object" && !Array.isArray(u) && (u._id || u.id || u.email)) {
           setUser(u);
         } else {
-          throw new Error("No user in response");
+          throw new Error("Unrecognised user payload");
         }
       })
       .catch((err) => {
@@ -185,8 +216,14 @@ export default function AdminUserAttendanceDetail() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 
+      // The backend may return the approximate AD month window so we can fill
+      // empty months.  Fall back to a rough conversion if not provided.
+      const adY = data.adYear  || selectedYear - 57;   // rough BS→AD offset
+      const adM = data.adMonth || selectedMonth;        // approximate
+      setAdWindow({ year: adY, month: adM });
+
       const joinDate = user?.joinedDate || user?.createdAt || null;
-      const records  = buildFullMonthRecords(data.records || [], joinDate);
+      const records  = buildFullMonthRecords(data.records || [], joinDate, adY, adM);
 
       setAttendanceRecords(records);
 
@@ -227,7 +264,7 @@ export default function AdminUserAttendanceDetail() {
       const s      = r.status || "absent";
       const bg     = s === "present" ? "#D1FAE5" : s === "absent" ? "#FEE2E2" : "#FEF3C7";
       const color  = s === "present" ? "#065F46" : s === "absent" ? "#991B1B" : "#92400E";
-      const dayLbl = r.date ? DAY_NAMES[new Date(r.date).getDay()] : (r.dayName || "—");
+      const dayLbl  = r.date ? DAY_NAMES[new Date(r.date).getDay()] : (r.dayName || "—");
       const dateLbl = r.nepaliDate || r.date?.slice(0, 10) || "—";
       return `<tr>
         <td>${dateLbl}</td><td>${dayLbl}</td>
@@ -362,9 +399,9 @@ export default function AdminUserAttendanceDetail() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: "Present Days",     value: stats.present, cls: "text-green-600"  },
-          { label: "Late Days",        value: stats.late,    cls: "text-orange-600" },
-          { label: "Absent Days",      value: stats.absent,  cls: "text-red-600"    },
+          { label: "Present Days", value: stats.present, cls: "text-green-600"  },
+          { label: "Late Days",    value: stats.late,    cls: "text-orange-600" },
+          { label: "Absent Days",  value: stats.absent,  cls: "text-red-600"    },
         ].map(({ label, value, cls }) => (
           <div key={label} className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
             <p className="text-xs text-gray-500">{label}</p>
@@ -436,8 +473,8 @@ export default function AdminUserAttendanceDetail() {
                     <tr
                       key={record._id || dateLabel + idx}
                       className={`transition-colors ${
-                        isOffDay  ? "bg-gray-50/80" :
-                        isAbsent  ? "bg-red-50/40"  :
+                        isOffDay ? "bg-gray-50/80" :
+                        isAbsent ? "bg-red-50/40"  :
                         "hover:bg-gray-50"
                       }`}
                     >
