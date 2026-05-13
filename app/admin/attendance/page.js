@@ -61,7 +61,8 @@ export default function AdminAttendancePage() {
 
       await Promise.allSettled(
         userList.map(async u => {
-          const userId = u._id || u.id;
+          const userId  = u._id || u.id;
+          const joinDate = u.joinedDate || u.createdAt;
           try {
             const { data } = await axios.get(
               `${API}/api/attendance/user/${userId}/summary`,
@@ -70,10 +71,18 @@ export default function AdminAttendancePage() {
                 params: { nepaliYear: selectedYear, nepaliMonth: selectedMonth },
               }
             );
-            const records = data.records || [];
+            let records = data.records || [];
+
+            // Filter records from joining date
+            if (joinDate) {
+              const join = new Date(joinDate);
+              join.setHours(0, 0, 0, 0);
+              records = records.filter(r => !r.date || new Date(r.date) >= join);
+            }
+
             const present = records.filter(r => r.checkIn || r.checkOut).length;
-            const late    = data.summary?.lateDays   || 0;
-            const absent  = data.summary?.absentDays || 0;
+            const late    = data.summary?.lateDays   || records.filter(r => r.isLate === true).length;
+            const absent  = data.summary?.absentDays || records.filter(r => r.status === "absent").length;
 
             statsMap[userId]  = { present, late, absent };
             totalPresent     += present;
@@ -333,7 +342,6 @@ export default function AdminAttendancePage() {
                 filteredUsers.map(u => {
                   const userId  = u._id || u.id;
                   const stats   = getStats(userId);
-                  // ✅ FIX: safe fallback when u.role is not in ROLE_META
                   const rc      = ROLE_META[u.role] || { label: u.role ? u.role.charAt(0).toUpperCase() + u.role.slice(1) : "Unknown" };
                   const roleCls = ROLE_COLOR[u.role] || ROLE_COLOR.user;
                   const initial = (u.fullName || u.name || "?")[0].toUpperCase();
@@ -378,7 +386,7 @@ export default function AdminAttendancePage() {
                         <span className="text-red-500 font-bold text-sm">{stats.absent}</span>
                       </td>
 
-                      {/* Detail link */}
+                      {/* Detail link — preserves existing route /admin/attendance/[userId] */}
                       <td className="px-4 py-3.5 text-center">
                         <Link
                           href={`/admin/attendance/${userId}?year=${selectedYear}&month=${selectedMonth}&type=${reportType}`}

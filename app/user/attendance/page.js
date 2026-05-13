@@ -86,6 +86,17 @@ const TH = ({ children }) => (
   </th>
 );
 
+// Filter records to only those on or after the user's joining date
+const filterFromJoinDate = (records, joinDate) => {
+  if (!joinDate) return records;
+  const join = new Date(joinDate);
+  join.setHours(0, 0, 0, 0);
+  return records.filter((r) => {
+    if (!r.date) return true; // keep if no date info
+    return new Date(r.date) >= join;
+  });
+};
+
 export default function UserAttendancePage() {
   const { user, token } = useApp();
   const today = getTodayBS();
@@ -106,7 +117,7 @@ export default function UserAttendancePage() {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-        },
+        }
       );
       if (!res.ok) return;
 
@@ -122,9 +133,15 @@ export default function UserAttendancePage() {
           uniqueMap[r.nepaliDate] = r;
       });
 
-      const sorted = Object.values(uniqueMap).sort(
-        (a, b) => new Date(a.date) - new Date(b.date),
+      // Sort and filter from joining date
+      const joinDate = user?.joinedDate || user?.createdAt;
+      const sorted = filterFromJoinDate(
+        Object.values(uniqueMap).sort(
+          (a, b) => new Date(a.date) - new Date(b.date)
+        ),
+        joinDate
       );
+
       setAttendanceRecords(sorted);
       setStats({
         present: sorted.filter((r) => r.checkIn || r.checkOut).length,
@@ -136,15 +153,12 @@ export default function UserAttendancePage() {
     } finally {
       setLoading(false);
     }
-  }, [token, selectedYear, selectedMonth]);
+  }, [token, selectedYear, selectedMonth, user]);
 
+  // Re-fetch whenever year or month changes
   useEffect(() => {
-    const loadAttendance = async () => {
-      await fetchAttendance();
-    };
-
-    loadAttendance();
-  }, []);
+    fetchAttendance();
+  }, [fetchAttendance]);
 
   const prevMonth = () => {
     if (selectedMonth === 1) {
@@ -212,6 +226,16 @@ export default function UserAttendancePage() {
     win.print();
   };
 
+  // Determine if current month/year is before the user's joining month
+  const joinDate = user?.joinedDate || user?.createdAt;
+  const isBeforeJoining = (() => {
+    if (!joinDate) return false;
+    const join = new Date(joinDate);
+    // Compare with selected BS year/month roughly via AD date
+    // We'll just show a notice if records are empty due to join date
+    return false; // handled via filtered records being empty
+  })();
+
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
       {/* Header */}
@@ -220,6 +244,17 @@ export default function UserAttendancePage() {
           <h1 className="text-2xl font-bold text-gray-800">My Attendance</h1>
           <p className="text-gray-500 text-sm mt-1">
             Track your daily attendance records
+            {joinDate && (
+              <span className="ml-2 text-xs text-blue-500">
+                (from{" "}
+                {new Date(joinDate).toLocaleDateString("en-US", {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                })}
+                )
+              </span>
+            )}
           </p>
         </div>
         <button
