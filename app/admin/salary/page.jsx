@@ -1,6 +1,7 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useApp } from "../../../lib/context";
 import SalarySettingModal from "@/components/SalarySettingModal";
 
 const MONTHS = [
@@ -10,33 +11,28 @@ const MONTHS = [
 
 const YEARS = ["2080","2081","2082","2083"]; // Nepali BS years — adjust as needed
 
-// --------------- Mock user data (replace with your real API/DB fetch) ---------------
-const MOCK_USERS = [
-  { id: 1, name: "Anjali Maharjan",  role: "Manager",          baseSalary: 45000 },
-  { id: 2, name: "Bikram Dangol",    role: "Senior Developer", baseSalary: 55000 },
-  { id: 3, name: "Sita Shrestha",    role: "Accountant",       baseSalary: 35000 },
-  { id: 4, name: "Ram Tamang",       role: "Designer",         baseSalary: 38000 },
-  { id: 5, name: "Priya Karki",      role: "HR Executive",     baseSalary: 32000 },
-  { id: 6, name: "Dev Rai",          role: "Support Staff",    baseSalary: 28000 },
-];
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 const ROLE_COLORS = {
-  Manager:           "bg-amber-500/10 text-amber-400 border-amber-500/20",
-  "Senior Developer":"bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
-  Accountant:        "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-  Designer:          "bg-violet-500/10 text-violet-400 border-violet-500/20",
-  "HR Executive":    "bg-pink-500/10 text-pink-400 border-pink-500/20",
-  "Support Staff":   "bg-slate-500/10 text-slate-400 border-slate-500/20",
+  manager:     "bg-amber-500/10 text-amber-400 border-amber-500/20",
+  collector:   "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
+  accountant:  "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+  helper:      "bg-violet-500/10 text-violet-400 border-violet-500/20",
+  staff:       "bg-pink-500/10 text-pink-400 border-pink-500/20",
 };
 
 export default function SalaryPage() {
   const router = useRouter();
+  const { token } = useApp();
   const currentMonth = new Date().getMonth(); // 0-indexed
   const currentYear  = new Date().getFullYear();
 
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[currentMonth]);
   const [selectedYear,  setSelectedYear]  = useState(String(currentYear));
   const [salaryModal,   setSalaryModal]   = useState(false);
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  
   const [settings, setSettings] = useState({
     bonusEnabled: false, bonusAmount: 0,
     overtimeEnabled: false, overtimeRate: 0,
@@ -44,9 +40,39 @@ export default function SalaryPage() {
   });
 
   // Per-user overrides: { [userId]: { salary, overtimeHours } }
-  const [userOverrides, setUserOverrides] = useState(() =>
-    Object.fromEntries(MOCK_USERS.map((u) => [u.id, { salary: u.baseSalary, overtimeHours: 0 }]))
-  );
+  const [userOverrides, setUserOverrides] = useState({});
+
+  // Fetch users from API
+  const fetchUsers = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/users`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      const fetchedUsers = data.users || [];
+      setUsers(fetchedUsers);
+      
+      // Initialize overrides with base salary (default 0 if not set)
+      const initialOverrides = {};
+      fetchedUsers.forEach((u) => {
+        initialOverrides[u._id] = {
+          salary: u.baseSalary || 0,
+          overtimeHours: 0
+        };
+      });
+      setUserOverrides(initialOverrides);
+    } catch (err) {
+      console.error("Failed to fetch users:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers]);
 
   const handleOverride = (userId, field, value) => {
     setUserOverrides((prev) => ({
@@ -56,7 +82,7 @@ export default function SalaryPage() {
   };
 
   const computeRow = (user) => {
-    const override = userOverrides[user.id];
+    const override = userOverrides[user._id] || { salary: 0, overtimeHours: 0 };
     const salary   = override.salary;
     const bonus    = settings.bonusEnabled ? settings.bonusAmount : 0;
     const overtime = settings.overtimeEnabled ? override.overtimeHours * settings.overtimeRate : 0;
@@ -69,11 +95,16 @@ export default function SalaryPage() {
       month: selectedMonth,
       year: selectedYear,
       settings,
-      rows: MOCK_USERS.map((u) => ({
-        ...u,
+      rows: users.map((u) => ({
+        id: u._id,
+        name: u.fullName,
+        role: u.role,
+        email: u.email,
+        biometricId: u.biometricId,
+        employeeId: u.employeeId,
         ...computeRow(u),
-        overtimeHours: userOverrides[u.id].overtimeHours,
-        salary: userOverrides[u.id].salary,
+        overtimeHours: userOverrides[u._id]?.overtimeHours || 0,
+        salary: userOverrides[u._id]?.salary || 0,
       })),
     };
     if (typeof window !== "undefined") {
@@ -172,10 +203,10 @@ export default function SalaryPage() {
         {/* ── Summary Cards ── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           {[
-            { label: "Total Staff",     value: MOCK_USERS.length,  suffix: "employees", color: "text-white" },
-            { label: "Total Payroll",   value: `NPR ${MOCK_USERS.reduce((s, u) => s + computeRow(u).total, 0).toLocaleString()}`, suffix: `for ${selectedMonth}`, color: "text-cyan-400" },
-            { label: "Bonus Pool",      value: settings.bonusEnabled ? `NPR ${(settings.bonusAmount * MOCK_USERS.length).toLocaleString()}` : "Disabled", suffix: "", color: "text-emerald-400" },
-            { label: "Total Overtime",  value: settings.overtimeEnabled ? `NPR ${MOCK_USERS.reduce((s, u) => s + computeRow(u).overtime, 0).toLocaleString()}` : "Disabled", suffix: "", color: "text-violet-400" },
+            { label: "Total Staff",     value: users.length,  suffix: "employees", color: "text-white" },
+            { label: "Total Payroll",   value: `NPR ${users.reduce((s, u) => s + (computeRow(u).total || 0), 0).toLocaleString()}`, suffix: `for ${selectedMonth}`, color: "text-cyan-400" },
+            { label: "Bonus Pool",      value: settings.bonusEnabled ? `NPR ${(settings.bonusAmount * users.length).toLocaleString()}` : "Disabled", suffix: "", color: "text-emerald-400" },
+            { label: "Total Overtime",  value: settings.overtimeEnabled ? `NPR ${users.reduce((s, u) => s + (computeRow(u).overtime || 0), 0).toLocaleString()}` : "Disabled", suffix: "", color: "text-violet-400" },
           ].map((c) => (
             <div key={c.label} className="bg-[#0f1623] border border-[#1e2d45] rounded-xl p-4">
               <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">{c.label}</p>
@@ -192,84 +223,94 @@ export default function SalaryPage() {
             <p className="text-xs text-gray-500 mt-0.5">Edit salary and overtime hours per employee</p>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[#1e2d45]">
-                  {["#","Name","Role","Base Salary (NPR)","Overtime (hrs)","Bonus","Overtime Pay","Total"].map((h) => (
-                    <th key={h} className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#1e2d45]">
-                {MOCK_USERS.map((user, idx) => {
-                  const row = computeRow(user);
-                  return (
-                    <tr key={user.id} className="hover:bg-[#1a2535]/40 transition-colors group">
-                      <td className="px-5 py-4 text-gray-600 text-sm">{idx + 1}</td>
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500/30 to-violet-500/30 border border-[#2a3a55] flex items-center justify-center text-xs font-bold text-white">
-                            {user.name.charAt(0)}
+          {loading ? (
+            <div className="py-16 text-center">
+              <p className="text-gray-400 text-sm">Loading users…</p>
+            </div>
+          ) : users.length === 0 ? (
+            <div className="py-16 text-center">
+              <p className="text-gray-400 text-sm">No users found</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-[#1e2d45]">
+                    {["#","Name","Role","Base Salary (NPR)","Overtime (hrs)","Bonus","Overtime Pay","Total"].map((h) => (
+                      <th key={h} className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#1e2d45]">
+                  {users.map((user, idx) => {
+                    const row = computeRow(user);
+                    return (
+                      <tr key={user._id} className="hover:bg-[#1a2535]/40 transition-colors group">
+                        <td className="px-5 py-4 text-gray-600 text-sm">{idx + 1}</td>
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500/30 to-violet-500/30 border border-[#2a3a55] flex items-center justify-center text-xs font-bold text-white">
+                              {(user.fullName || "?")[0]?.toUpperCase()}
+                            </div>
+                            <span className="text-sm font-medium text-white whitespace-nowrap">{user.fullName}</span>
                           </div>
-                          <span className="text-sm font-medium text-white whitespace-nowrap">{user.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-4">
-                        <span className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${ROLE_COLORS[user.role] || "bg-gray-500/10 text-gray-400 border-gray-500/20"}`}>
-                          {user.role}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs text-gray-500">NPR</span>
-                          <input
-                            type="number"
-                            value={userOverrides[user.id].salary}
-                            onChange={(e) => handleOverride(user.id, "salary", e.target.value)}
-                            className="w-28 bg-[#1a2535] border border-[#2a3a55] rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-cyan-500 transition-colors"
-                          />
-                        </div>
-                      </td>
-                      <td className="px-5 py-4">
-                        {settings.overtimeEnabled ? (
-                          <input
-                            type="number"
-                            value={userOverrides[user.id].overtimeHours}
-                            onChange={(e) => handleOverride(user.id, "overtimeHours", e.target.value)}
-                            className="w-20 bg-[#1a2535] border border-[#2a3a55] rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-violet-500 transition-colors"
-                            min="0"
-                          />
-                        ) : (
-                          <span className="text-gray-600 text-sm">—</span>
-                        )}
-                      </td>
-                      <td className="px-5 py-4 text-sm text-emerald-400 font-medium whitespace-nowrap">
-                        {row.bonus > 0 ? `NPR ${row.bonus.toLocaleString()}` : <span className="text-gray-600">—</span>}
-                      </td>
-                      <td className="px-5 py-4 text-sm text-violet-400 font-medium whitespace-nowrap">
-                        {row.overtime > 0 ? `NPR ${row.overtime.toLocaleString()}` : <span className="text-gray-600">—</span>}
-                      </td>
-                      <td className="px-5 py-4 text-sm text-cyan-400 font-bold whitespace-nowrap">
-                        NPR {row.total.toLocaleString()}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              {/* Footer total */}
-              <tfoot>
-                <tr className="border-t-2 border-[#2a3a55] bg-[#1a2535]/50">
-                  <td colSpan={7} className="px-5 py-4 text-sm font-semibold text-gray-400 text-right">Grand Total</td>
-                  <td className="px-5 py-4 text-base font-bold text-cyan-400 whitespace-nowrap">
-                    NPR {MOCK_USERS.reduce((s, u) => s + computeRow(u).total, 0).toLocaleString()}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <span className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${ROLE_COLORS[user.role] || "bg-gray-500/10 text-gray-400 border-gray-500/20"}`}>
+                            {user.role?.charAt(0).toUpperCase() + user.role?.slice(1)}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-gray-500">NPR</span>
+                            <input
+                              type="number"
+                              value={userOverrides[user._id]?.salary || 0}
+                              onChange={(e) => handleOverride(user._id, "salary", e.target.value)}
+                              className="w-28 bg-[#1a2535] border border-[#2a3a55] rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-cyan-500 transition-colors"
+                            />
+                          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          {settings.overtimeEnabled ? (
+                            <input
+                              type="number"
+                              value={userOverrides[user._id]?.overtimeHours || 0}
+                              onChange={(e) => handleOverride(user._id, "overtimeHours", e.target.value)}
+                              className="w-20 bg-[#1a2535] border border-[#2a3a55] rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-violet-500 transition-colors"
+                              min="0"
+                            />
+                          ) : (
+                            <span className="text-gray-600 text-sm">—</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-4 text-sm text-emerald-400 font-medium whitespace-nowrap">
+                          {row.bonus > 0 ? `NPR ${row.bonus.toLocaleString()}` : <span className="text-gray-600">—</span>}
+                        </td>
+                        <td className="px-5 py-4 text-sm text-violet-400 font-medium whitespace-nowrap">
+                          {row.overtime > 0 ? `NPR ${row.overtime.toLocaleString()}` : <span className="text-gray-600">—</span>}
+                        </td>
+                        <td className="px-5 py-4 text-sm text-cyan-400 font-bold whitespace-nowrap">
+                          NPR {row.total.toLocaleString()}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                {/* Footer total */}
+                <tfoot>
+                  <tr className="border-t-2 border-[#2a3a55] bg-[#1a2535]/50">
+                    <td colSpan={7} className="px-5 py-4 text-sm font-semibold text-gray-400 text-right">Grand Total</td>
+                    <td className="px-5 py-4 text-base font-bold text-cyan-400 whitespace-nowrap">
+                      NPR {users.reduce((s, u) => s + (computeRow(u).total || 0), 0).toLocaleString()}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
         </div>
       </div>
 
