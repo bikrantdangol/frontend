@@ -81,7 +81,14 @@ export default function AdminUserAttendanceDetail() {
         // Count any day with a punch as present (like user attendance page)
         const present = records.filter((r) => r.checkIn || r.checkOut).length;
         const late = records.filter((r) => r.isLate === true).length;
-        const absent = records.filter((r) => r.status === "absent").length;
+        const absent = records.filter(
+          (r) =>
+            !r.checkIn &&
+            !r.checkOut &&
+            r.status !== "weekend" &&
+            r.status !== "holiday" &&
+            r.status !== "on-leave",
+        ).length;
         const total = present + late + absent;
         setStats({
           present,
