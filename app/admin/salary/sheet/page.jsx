@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useLang } from "../../../../lib/LangContext";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function fmt(n) {
@@ -10,7 +11,6 @@ function tax(amount, rate) {
   return Math.round((amount * rate) / 100);
 }
 
-// ─── Print / PDF styles injected into <head> ────────────────────────────────
 const PRINT_STYLES = `
 @page { size: A4 landscape; margin: 12mm; }
 @media print {
@@ -20,10 +20,71 @@ const PRINT_STYLES = `
 }
 `;
 
+const TEXT = {
+  en: {
+    loading:        "Loading salary data…",
+    goBack:         "← Go back and enter salary data",
+    backBtn:        "Back to Salary Entry",
+    sheetTitle:     "Salary Sheet",
+    downloadPdf:    "Download PDF (Landscape)",
+    previewHint:    'Preview below • Click "Download PDF" to export in A4 landscape',
+    salarySheet:    "SALARY SHEET",
+    month:          "Month",
+    sn:             "S.N.",
+    name:           "Name",
+    designation:    "Designation",
+    staffBonus:     "Staff Bonus",
+    staffSalary:    "Staff Salary",
+    overtime:       "Overtime",
+    grandTotal:     "Grand Total",
+    signature:      "Signature",
+    bonus:          "Bonus",
+    tax:            "Tax",
+    amount:         "Amount",
+    salary:         "Salary",
+    otHours:        "OT Hours",
+    otRate:         "OT Rate",
+    total:          "TOTAL",
+    preparedBy:     "Prepared by",
+    approvedBy:     "Approved by",
+    date:           "Date",
+  },
+  np: {
+    loading:        "तलब डेटा लोड हुँदैछ…",
+    goBack:         "← फिर्ता जानुस् र तलब डेटा प्रविष्ट गर्नुस्",
+    backBtn:        "तलब प्रविष्टिमा फिर्ता",
+    sheetTitle:     "तलब पाना",
+    downloadPdf:    "PDF डाउनलोड गर्नुस् (Landscape)",
+    previewHint:    'तलको पूर्वावलोकन हेर्नुस् • A4 landscape मा निर्यात गर्न "PDF डाउनलोड" थिच्नुस्',
+    salarySheet:    "तलब पाना",
+    month:          "महिना",
+    sn:             "क्र.सं.",
+    name:           "नाम",
+    designation:    "पद",
+    staffBonus:     "कर्मचारी बोनस",
+    staffSalary:    "कर्मचारी तलब",
+    overtime:       "ओभरटाइम",
+    grandTotal:     "महाजम्मा",
+    signature:      "दस्तखत",
+    bonus:          "बोनस",
+    tax:            "कर",
+    amount:         "रकम",
+    salary:         "तलब",
+    otHours:        "OT घण्टा",
+    otRate:         "OT दर",
+    total:          "जम्मा",
+    preparedBy:     "तयार गर्नेः",
+    approvedBy:     "स्वीकृत गर्नेः",
+    date:           "मिति",
+  },
+};
+
 export default function SalarySheetPage() {
-  const router = useRouter();
+  const router   = useRouter();
   const printRef = useRef(null);
   const [data, setData] = useState(null);
+  const { lang } = useLang();
+  const t        = TEXT[lang] || TEXT.en;
 
   useEffect(() => {
     const raw = sessionStorage.getItem("salarySheetData");
@@ -44,12 +105,12 @@ export default function SalarySheetPage() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="w-12 h-12 rounded-full border-2 border-blue-200 border-t-blue-500 animate-spin mx-auto mb-4" />
-          <p className="text-gray-400 text-sm">Loading salary data…</p>
+          <p className="text-gray-400 text-sm">{t.loading}</p>
           <button
             onClick={() => router.push("/admin/salary")}
             className="mt-4 text-blue-500 text-sm hover:underline"
           >
-            ← Go back and enter salary data
+            {t.goBack}
           </button>
         </div>
       </div>
@@ -71,11 +132,11 @@ export default function SalarySheetPage() {
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
-            Back to Salary Entry
+            {t.backBtn}
           </button>
           <span className="text-gray-300">|</span>
           <h1 className="text-gray-800 font-semibold">
-            Salary Sheet — {month} {year}
+            {t.sheetTitle} — {month} {year}
           </h1>
         </div>
         <button
@@ -85,56 +146,54 @@ export default function SalarySheetPage() {
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
           </svg>
-          Download PDF (Landscape)
+          {t.downloadPdf}
         </button>
       </div>
 
       {/* ── Preview hint ── */}
       <div className="no-print py-6 px-6 flex justify-center">
-        <p className="text-gray-400 text-xs">Preview below • Click "Download PDF" to export in A4 landscape</p>
+        <p className="text-gray-400 text-xs">{t.previewHint}</p>
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          PRINTABLE SALARY SHEET
-      ══════════════════════════════════════════════════════════════════════ */}
+      {/* ── Printable Sheet ── */}
       <div
         ref={printRef}
         className="print-page mx-auto bg-white text-black shadow-xl rounded-lg overflow-hidden"
         style={{ width: "277mm", minHeight: "190mm", padding: "14mm", fontFamily: "'Times New Roman', Times, serif", fontSize: "11px" }}
       >
-        {/* ── Document Header ── */}
+        {/* Document Header */}
         <div style={{ textAlign: "center", marginBottom: "10px" }}>
           <div style={{ fontSize: "15px", fontWeight: "bold", letterSpacing: "1px", borderBottom: "2px solid #000", paddingBottom: "4px", display: "inline-block", minWidth: "400px" }}>
-            SALARY SHEET
+            {t.salarySheet}
           </div>
           <div style={{ fontSize: "12px", marginTop: "4px", color: "#333" }}>
-            Month: <strong>{month} {year}</strong>
+            {t.month}: <strong>{month} {year}</strong>
           </div>
         </div>
 
-        {/* ── Main Table ── */}
+        {/* Main Table */}
         <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "6px" }}>
           <thead>
             <tr style={{ backgroundColor: "#000", color: "#fff" }}>
-              <th rowSpan={2} style={thStyle({ width: "28px" })}>S.N.</th>
-              <th rowSpan={2} style={thStyle({ width: "130px" })}>Name</th>
-              <th rowSpan={2} style={thStyle({ width: "100px" })}>Designation</th>
-              <th colSpan={3} style={thStyle({ textAlign: "center" })}>Staff Bonus</th>
-              <th colSpan={3} style={thStyle({ textAlign: "center" })}>Staff Salary</th>
-              <th colSpan={3} style={thStyle({ textAlign: "center" })}>Overtime</th>
-              <th rowSpan={2} style={thStyle({ width: "70px" })}>Grand Total</th>
-              <th rowSpan={2} style={thStyle({ width: "60px" })}>Signature</th>
+              <th rowSpan={2} style={thStyle({ width: "28px" })}>{t.sn}</th>
+              <th rowSpan={2} style={thStyle({ width: "130px" })}>{t.name}</th>
+              <th rowSpan={2} style={thStyle({ width: "100px" })}>{t.designation}</th>
+              <th colSpan={3} style={thStyle({ textAlign: "center" })}>{t.staffBonus}</th>
+              <th colSpan={3} style={thStyle({ textAlign: "center" })}>{t.staffSalary}</th>
+              <th colSpan={3} style={thStyle({ textAlign: "center" })}>{t.overtime}</th>
+              <th rowSpan={2} style={thStyle({ width: "70px" })}>{t.grandTotal}</th>
+              <th rowSpan={2} style={thStyle({ width: "60px" })}>{t.signature}</th>
             </tr>
             <tr style={{ backgroundColor: "#333", color: "#fff" }}>
-              <th style={subTh}>Bonus</th>
-              <th style={subTh}>Tax {taxRate}%</th>
-              <th style={subTh}>Amount</th>
-              <th style={subTh}>Salary</th>
-              <th style={subTh}>Tax {taxRate}%</th>
-              <th style={subTh}>Amount</th>
-              <th style={subTh}>OT Hours</th>
-              <th style={subTh}>OT Rate</th>
-              <th style={subTh}>Amount</th>
+              <th style={subTh}>{t.bonus}</th>
+              <th style={subTh}>{t.tax} {taxRate}%</th>
+              <th style={subTh}>{t.amount}</th>
+              <th style={subTh}>{t.salary}</th>
+              <th style={subTh}>{t.tax} {taxRate}%</th>
+              <th style={subTh}>{t.amount}</th>
+              <th style={subTh}>{t.otHours}</th>
+              <th style={subTh}>{t.otRate}</th>
+              <th style={subTh}>{t.amount}</th>
             </tr>
           </thead>
 
@@ -143,15 +202,12 @@ export default function SalarySheetPage() {
               const bonusVal  = row.bonus || 0;
               const bonusTax  = bonusVal > 0 ? tax(bonusVal, taxRate) : 0;
               const bonusNet  = bonusVal - bonusTax;
-
               const salaryVal = row.salary || 0;
               const salaryTax = tax(salaryVal, taxRate);
               const salaryNet = salaryVal - salaryTax;
-
               const otHours   = row.overtimeHours || 0;
               const otRate    = settings.overtimeEnabled ? settings.overtimeRate : 0;
               const otAmount  = row.overtime || 0;
-
               const grandTotal = salaryNet + bonusNet + otAmount;
               const rowBg = idx % 2 === 0 ? "#fff" : "#f9f9f9";
 
@@ -177,7 +233,7 @@ export default function SalarySheetPage() {
 
             {/* Totals row */}
             <tr style={{ backgroundColor: "#000", color: "#fff", fontWeight: "bold" }}>
-              <td colSpan={3} style={{ ...tdStyle({}), color: "#fff", textAlign: "right", backgroundColor: "#000" }}>TOTAL</td>
+              <td colSpan={3} style={{ ...tdStyle({}), color: "#fff", textAlign: "right", backgroundColor: "#000" }}>{t.total}</td>
               <td style={{ ...tdStyle({ textAlign: "right" }), color: "#fff", backgroundColor: "#000" }}>
                 {fmt(rows.reduce((s, r) => s + (r.bonus || 0), 0))}
               </td>
@@ -215,29 +271,28 @@ export default function SalarySheetPage() {
           </tbody>
         </table>
 
-        {/* ── Footer signatures ── */}
+        {/* Footer signatures */}
         <div style={{ marginTop: "28px", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
           <div style={{ textAlign: "left" }}>
             <div style={{ width: "160px", borderTop: "1px solid #000", paddingTop: "4px", marginTop: "30px" }}>
-              <div style={{ fontSize: "11px", fontWeight: "bold" }}>Prepared by</div>
+              <div style={{ fontSize: "11px", fontWeight: "bold" }}>{t.preparedBy}</div>
               <div style={{ fontSize: "11px" }}>Anjali Maharjan</div>
             </div>
           </div>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: "11px", color: "#555" }}>
-              Date: {month} {year}
+              {t.date}: {month} {year}
             </div>
           </div>
           <div style={{ textAlign: "right" }}>
             <div style={{ width: "160px", borderTop: "1px solid #000", paddingTop: "4px", marginTop: "30px", marginLeft: "auto" }}>
-              <div style={{ fontSize: "11px", fontWeight: "bold" }}>Approved by</div>
+              <div style={{ fontSize: "11px", fontWeight: "bold" }}>{t.approvedBy}</div>
               <div style={{ fontSize: "11px" }}>Bikram Dangol</div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Screen-only bottom padding */}
       <div className="no-print h-16" />
     </div>
   );
