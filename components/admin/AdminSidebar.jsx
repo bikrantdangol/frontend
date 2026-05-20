@@ -3,26 +3,43 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import Image from "next/image";
 import { useApp, ROLE_META } from "../../lib/context";
+import { useLang } from "../../lib/LangContext";
 
 const LINKS = [
-  { href: "/admin/attendance", label: "Attendance",    Icon: IcoTime  },
-  { href: "/admin/dashboard",  label: "Dashboard",     Icon: IcoDash  },
-  { href: "/admin/leave",      label: "Leave Requests",Icon: IcoCal   },
-  { href: "/admin/users",      label: "Manage Users",  Icon: IcoUsers },
-  { href: "/admin/salary",     label: "Salary",        Icon: IcoSalary},
-  { href: "/admin/settings",   label: "Settings",      Icon: IcoSet   },
+  { href: "/admin/attendance", labelEn: "Attendance",     labelNp: "हाजिरी",          Icon: IcoTime   },
+  { href: "/admin/dashboard",  labelEn: "Dashboard",      labelNp: "ड्यासबोर्ड",      Icon: IcoDash   },
+  { href: "/admin/leave",      labelEn: "Leave Requests", labelNp: "बिदा अनुरोध",     Icon: IcoCal    },
+  { href: "/admin/users",      labelEn: "Manage Users",   labelNp: "प्रयोगकर्ता",     Icon: IcoUsers  },
+  { href: "/admin/salary",     labelEn: "Salary",         labelNp: "तलब",             Icon: IcoSalary },
+  { href: "/admin/settings",   labelEn: "Settings",       labelNp: "सेटिङ",           Icon: IcoSet    },
 ];
 
+const SIDEBAR_TEXT = {
+  en: {
+    portal:     "Admin Portal",
+    navigation: "Navigation",
+    logout:     "Logout",
+  },
+  np: {
+    portal:     "एडमिन पोर्टल",
+    navigation: "नेभिगेसन",
+    logout:     "लगआउट",
+  },
+};
+
 export default function AdminSidebar({ open, onClose }) {
-  const path = usePathname();
+  const path   = usePathname();
   const router = useRouter();
   const { user, logout } = useApp();
+  const { lang } = useLang();
+  const s = SIDEBAR_TEXT[lang] || SIDEBAR_TEXT.en;
+
   const pending = 0;
   const rm = ROLE_META[user?.role] || ROLE_META.user;
 
-  const displayName = user?.fullName || user?.name || "Admin";
+  const displayName   = user?.fullName || user?.name || "Admin";
   const avatarInitial = displayName[0]?.toUpperCase();
-  const photoUrl = user?.photoUrl || null;
+  const photoUrl      = user?.photoUrl || null;
 
   const doLogout = () => {
     logout();
@@ -43,31 +60,29 @@ export default function AdminSidebar({ open, onClose }) {
           />
         </div>
         <div>
-          <p className="text-white font-extrabold text-sm leading-tight">
-            MirmiraHRMS
-          </p>
-          <p className="text-white/40 text-[11px] mt-0.5">Admin Portal</p>
+          <p className="text-white font-extrabold text-sm leading-tight">MirmiraHRMS</p>
+          <p className="text-white/40 text-[11px] mt-0.5">{s.portal}</p>
         </div>
       </div>
 
       {/* Navigation */}
       <div className="flex-1 py-2">
         <p className="text-white/30 text-[10px] font-bold uppercase tracking-widest px-5 pt-3 pb-1">
-          Navigation
+          {s.navigation}
         </p>
-        {LINKS.map(({ href, label, Icon }) => {
-          const active = path === href || path.startsWith(href + "/");
+        {LINKS.map(({ href, labelEn, labelNp, Icon }) => {
+          const active  = path === href || path.startsWith(href + "/");
           const isBadge = href === "/admin/leave" && pending > 0;
+          const label   = lang === "np" ? labelNp : labelEn;
           return (
             <Link
               key={href}
               href={href}
               onClick={onClose}
               className={`relative flex items-center gap-2.5 mx-2 my-0.5 px-2.5 py-2.5 rounded-[9px] text-[13.5px] font-medium transition-colors duration-150 no-underline
-                ${
-                  active
-                    ? "bg-white/[0.14] text-white"
-                    : "text-white/60 hover:bg-white/[0.07] hover:text-white/90"
+                ${active
+                  ? "bg-white/[0.14] text-white"
+                  : "text-white/60 hover:bg-white/[0.07] hover:text-white/90"
                 }`}
             >
               {/* Active indicator */}
@@ -76,10 +91,8 @@ export default function AdminSidebar({ open, onClose }) {
               )}
 
               {/* Icon box */}
-              <span
-                className={`w-[30px] h-[30px] rounded-[7px] flex items-center justify-center shrink-0
-                ${active ? "bg-white/[0.16]" : "bg-white/[0.07]"}`}
-              >
+              <span className={`w-[30px] h-[30px] rounded-[7px] flex items-center justify-center shrink-0
+                ${active ? "bg-white/[0.16]" : "bg-white/[0.07]"}`}>
                 <Icon />
               </span>
 
@@ -101,20 +114,13 @@ export default function AdminSidebar({ open, onClose }) {
         <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-[9px] bg-white/[0.06] mb-1.5">
           <div className="w-8 h-8 rounded-full shrink-0 overflow-hidden flex items-center justify-center bg-yellow-400 text-green-900 font-extrabold text-sm relative">
             {photoUrl ? (
-              <Image
-                src={photoUrl}
-                alt={displayName}
-                fill
-                className="object-cover"
-              />
+              <Image src={photoUrl} alt={displayName} fill className="object-cover" />
             ) : (
               avatarInitial
             )}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-white text-[13px] font-bold truncate">
-              {displayName}
-            </p>
+            <p className="text-white text-[13px] font-bold truncate">{displayName}</p>
             <p className="text-white/40 text-[10.5px]">{rm.label}</p>
           </div>
         </div>
@@ -125,20 +131,13 @@ export default function AdminSidebar({ open, onClose }) {
           className="flex items-center gap-2.5 w-full px-2.5 py-2.5 rounded-[9px] text-[13.5px] font-medium text-red-400 bg-transparent hover:bg-red-500/10 transition-colors duration-150 cursor-pointer border-none font-[inherit]"
         >
           <span className="w-[30px] h-[30px] rounded-[7px] flex items-center justify-center bg-red-500/10 shrink-0">
-            <svg
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
-            >
+            <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
               <polyline points="16 17 21 12 16 7" />
               <line x1="21" y1="12" x2="9" y2="12" />
             </svg>
           </span>
-          <span>Logout</span>
+          <span>{s.logout}</span>
         </button>
       </div>
     </nav>
@@ -154,12 +153,7 @@ export default function AdminSidebar({ open, onClose }) {
       {/* Mobile drawer overlay */}
       {open && (
         <div className="fixed inset-0 z-50 lg:hidden flex">
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-            onClick={onClose}
-          />
-          {/* Drawer */}
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
           <div className="relative z-10 h-full">{sidebarContent}</div>
         </div>
       )}
