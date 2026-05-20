@@ -25,6 +25,17 @@ const toNPT = (utcDate) => {
   });
 };
 
+// Calculate duration between check-in and check-out
+const calcDuration = (checkIn, checkOut) => {
+  if (!checkIn || !checkOut) return "—";
+  const diffMs = new Date(checkOut) - new Date(checkIn);
+  if (diffMs <= 0) return "—";
+  const totalMins = Math.floor(diffMs / 60000);
+  const hours = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  return `${hours}h ${mins.toString().padStart(2, "0")}m`;
+};
+
 export default function AdminUserAttendanceDetail() {
   const params = useParams();
   const userId = params.userId || params.id;
@@ -78,7 +89,6 @@ export default function AdminUserAttendanceDetail() {
         const records = data.records || [];
         setAttendanceRecords(records);
 
-        // Count any day with a punch as present (like user attendance page)
         const present = records.filter((r) => r.checkIn || r.checkOut).length;
         const late = records.filter((r) => r.isLate === true).length;
         const absent = records.filter(
@@ -124,73 +134,285 @@ export default function AdminUserAttendanceDetail() {
     }
   };
 
-  // PDF export (using real data)
+  // ── PDF Export ─────────────────────────────────────────────────────────────
   const exportPDF = () => {
     const printWindow = window.open("", "_blank");
-    const title = `Attendance Report - ${BS_MONTHS_EN[selectedMonth - 1]} ${selectedYear}`;
+    const userName = user?.fullName || user?.name || "Unknown";
+    const userRole = user?.role
+      ? user.role.charAt(0).toUpperCase() + user.role.slice(1)
+      : "—";
+    const generatedDate = new Date().toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
 
     const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+    // Summary counts for PDF header pills
+    const presentCount = attendanceRecords.filter(
+      (r) => r.checkIn || r.checkOut,
+    ).length;
+    const lateCount = attendanceRecords.filter((r) => r.isLate).length;
+    const absentCount = attendanceRecords.filter(
+      (r) =>
+        !r.checkIn &&
+        !r.checkOut &&
+        r.status !== "weekend" &&
+        r.status !== "holiday" &&
+        r.status !== "on-leave",
+    ).length;
+
+    // Status badge HTML helper
+    const statusBadge = (status, isLate) => {
+      const styles = {
+        present:    { bg: "#D1FAE5", color: "#065F46" },
+        absent:     { bg: "#FEE2E2", color: "#991B1B" },
+        "on-leave": { bg: "#DBEAFE", color: "#1E40AF" },
+        holiday:    { bg: "#EDE9FE", color: "#5B21B6" },
+        weekend:    { bg: "#F3F4F6", color: "#6B7280" },
+        "half-day": { bg: "#FEF9C3", color: "#854D0E" },
+      };
+      const isLatePresent = isLate && status === "present";
+      const key = isLatePresent ? "present" : status;
+      const label = isLatePresent
+        ? "Late"
+        : status
+          ? status.charAt(0).toUpperCase() + status.slice(1).replace("-", " ")
+          : "—";
+      const s = styles[key] || { bg: "#F3F4F6", color: "#374151" };
+      return `<span style="background:${s.bg};color:${s.color};padding:2px 10px;border-radius:20px;font-size:10.5px;font-weight:600;white-space:nowrap;">${label}</span>`;
+    };
+
     const tableRows = attendanceRecords
-      .map((record) => {
+      .map((record, i) => {
         const dateObj = record.date ? new Date(record.date) : null;
         const dayName = dateObj ? dayNames[dateObj.getDay()] : "—";
-        const status = record.status || "absent";
+        const duration = calcDuration(record.checkIn, record.checkOut);
+
         const remarks =
           [
-            record.isLate && "Late check-in",
-            record.isEarlyLeave && "Early check-out",
+            record.isLate && record.isEarlyLeave
+              ? "Late in & early out"
+              : record.isLate
+                ? "Late check-in"
+                : record.isEarlyLeave
+                  ? "Early check-out"
+                  : null,
             record.overtimeMinutes > 0 &&
               `OT: ${Math.floor(record.overtimeMinutes / 60)}h ${record.overtimeMinutes % 60}m`,
           ]
             .filter(Boolean)
             .join(" · ") || "—";
 
+        const rowBg = i % 2 === 0 ? "#ffffff" : "#f9fafb";
+
         return `
-        <tr>
-          <td style="border:1px solid #ddd;padding:8px;">${record.nepaliDate || "—"}</td>
-          <td style="border:1px solid #ddd;padding:8px;">${dayName}</td>
-          <td style="border:1px solid #ddd;padding:8px;">${toNPT(record.checkIn)}</td>
-          <td style="border:1px solid #ddd;padding:8px;">${toNPT(record.checkOut)}</td>
-          <td style="border:1px solid #ddd;padding:8px;">
-            <span style="background:${
-              status === "present"
-                ? "#D1FAE5"
-                : status === "absent"
-                  ? "#FEE2E2"
-                  : "#FEF3C7"
-            };color:${
-              status === "present"
-                ? "#065F46"
-                : status === "absent"
-                  ? "#991B1B"
-                  : "#92400E"
-            };padding:2px 8px;border-radius:20px;">
-              ${status.charAt(0).toUpperCase() + status.slice(1)}
-            </span>
-          </td>
-          <td style="border:1px solid #ddd;padding:8px;">${remarks}</td>
+        <tr style="background:${rowBg};">
+          <td style="border:1px solid #e5e7eb;padding:6px 9px;text-align:center;color:#9ca3af;">${i + 1}</td>
+          <td style="border:1px solid #e5e7eb;padding:6px 9px;font-weight:600;">${record.nepaliDate || "—"}</td>
+          <td style="border:1px solid #e5e7eb;padding:6px 9px;color:#6b7280;">${dayName}</td>
+          <td style="border:1px solid #e5e7eb;padding:6px 9px;">${toNPT(record.checkIn)}</td>
+          <td style="border:1px solid #e5e7eb;padding:6px 9px;">${toNPT(record.checkOut)}</td>
+          <td style="border:1px solid #e5e7eb;padding:6px 9px;text-align:center;font-weight:700;color:#1d4ed8;">${duration}</td>
+          <td style="border:1px solid #e5e7eb;padding:6px 9px;text-align:center;">${statusBadge(record.status, record.isLate)}</td>
+          <td style="border:1px solid #e5e7eb;padding:6px 9px;color:#6b7280;font-size:10.5px;">${remarks}</td>
         </tr>`;
       })
       .join("");
 
     printWindow.document.write(`
       <html>
-        <head><title>${title}</title>
-        <style>
-          body{font-family:Arial;margin:40px} h1{color:#1F2937}
-          table{width:100%;border-collapse:collapse;margin-top:20px}
-          th{background:#F9FAFB;border:1px solid #ddd;padding:10px;text-align:left}
-          td{border:1px solid #ddd;padding:8px}
-        </style></head>
+        <head>
+          <title>Attendance Report — ${BS_MONTHS_EN[selectedMonth - 1]} ${selectedYear}</title>
+          <style>
+            @page { size: A4 landscape; margin: 14mm 12mm; }
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #1f2937; background: #fff; }
+
+            /* ── Page header ── */
+            .page-header {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              margin-bottom: 14px;
+              padding-bottom: 12px;
+              border-bottom: 2.5px solid #1d4ed8;
+            }
+            .page-header-left h1 {
+              font-size: 19px;
+              font-weight: 700;
+              color: #1d4ed8;
+              letter-spacing: 0.3px;
+            }
+            .page-header-left p {
+              font-size: 11.5px;
+              color: #6b7280;
+              margin-top: 3px;
+            }
+            .page-header-right {
+              text-align: right;
+              font-size: 11px;
+              color: #6b7280;
+              line-height: 1.8;
+            }
+            .page-header-right .date-label {
+              font-size: 10px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              color: #9ca3af;
+            }
+            .page-header-right .date-value {
+              font-size: 12.5px;
+              font-weight: 700;
+              color: #1f2937;
+            }
+
+            /* ── Employee info bar ── */
+            .emp-bar {
+              display: flex;
+              align-items: center;
+              gap: 14px;
+              background: #eff6ff;
+              border: 1px solid #bfdbfe;
+              border-radius: 10px;
+              padding: 9px 14px;
+              margin-bottom: 14px;
+            }
+            .emp-avatar {
+              width: 40px;
+              height: 40px;
+              background: #1d4ed8;
+              color: white;
+              border-radius: 50%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 17px;
+              font-weight: 700;
+              flex-shrink: 0;
+            }
+            .emp-name { font-size: 14px; font-weight: 700; color: #1e3a8a; }
+            .emp-role {
+              font-size: 10.5px;
+              color: #2563eb;
+              background: #dbeafe;
+              padding: 2px 10px;
+              border-radius: 20px;
+              display: inline-block;
+              margin-top: 3px;
+              font-weight: 600;
+            }
+
+            /* ── Summary pills ── */
+            .summary { display: flex; gap: 10px; margin-bottom: 14px; }
+            .pill {
+              flex: 1;
+              border-radius: 8px;
+              padding: 7px 12px;
+              text-align: center;
+            }
+            .pill .val { font-size: 19px; font-weight: 700; }
+            .pill .lbl { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+            .pill-green  { background: #d1fae5; color: #065f46; }
+            .pill-orange { background: #ffedd5; color: #9a3412; }
+            .pill-red    { background: #fee2e2; color: #991b1b; }
+            .pill-blue   { background: #dbeafe; color: #1e40af; }
+
+            /* ── Table ── */
+            table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+            thead tr { background: #1d4ed8; color: white; }
+            th {
+              padding: 8px 9px;
+              text-align: left;
+              font-weight: 600;
+              font-size: 10.5px;
+              text-transform: uppercase;
+              letter-spacing: 0.4px;
+              border: 1px solid #1e40af;
+            }
+            td { border: 1px solid #e5e7eb; padding: 6px 9px; vertical-align: middle; }
+
+            /* ── Footer ── */
+            .footer {
+              margin-top: 22px;
+              display: flex;
+              justify-content: space-between;
+              font-size: 10.5px;
+              color: #9ca3af;
+              border-top: 1px solid #e5e7eb;
+              padding-top: 8px;
+            }
+          </style>
+        </head>
         <body>
-          <h1>${title}</h1>
-          <p>Employee: ${user?.fullName || user?.name} (${user?.email})</p>
-          <p>Generated: ${new Date().toLocaleString()}</p>
+
+          <!-- Page header -->
+          <div class="page-header">
+            <div class="page-header-left">
+              <h1>Attendance Report</h1>
+              <p>${BS_MONTHS_EN[selectedMonth - 1]} ${selectedYear} &nbsp;·&nbsp; ${attendanceRecords.length} records</p>
+            </div>
+            <div class="page-header-right">
+              <div class="date-label">Date Generated</div>
+              <div class="date-value">${generatedDate}</div>
+            </div>
+          </div>
+
+          <!-- Employee bar -->
+          <div class="emp-bar">
+            <div class="emp-avatar">${userName.charAt(0).toUpperCase()}</div>
+            <div>
+              <div class="emp-name">${userName}</div>
+              <div class="emp-role">${userRole}</div>
+            </div>
+          </div>
+
+          <!-- Summary pills -->
+          <div class="summary">
+            <div class="pill pill-green">
+              <div class="val">${presentCount}</div>
+              <div class="lbl">Present</div>
+            </div>
+            <div class="pill pill-orange">
+              <div class="val">${lateCount}</div>
+              <div class="lbl">Late</div>
+            </div>
+            <div class="pill pill-red">
+              <div class="val">${absentCount}</div>
+              <div class="lbl">Absent</div>
+            </div>
+            <div class="pill pill-blue">
+              <div class="val">${attendanceRecords.length}</div>
+              <div class="lbl">Total Days</div>
+            </div>
+          </div>
+
+          <!-- Attendance table -->
           <table>
-            <thead><tr><th>Date (BS)</th><th>Day</th><th>Check In</th><th>Check Out</th><th>Status</th><th>Remarks</th></tr></thead>
-            <tbody>${tableRows}</tbody>
+            <thead>
+              <tr>
+                <th style="width:32px;">#</th>
+                <th style="width:88px;">Date (BS)</th>
+                <th style="width:44px;">Day</th>
+                <th style="width:74px;">Check In</th>
+                <th style="width:74px;">Check Out</th>
+                <th style="width:68px;">Duration</th>
+                <th style="width:80px;">Status</th>
+                <th>Remarks</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRows}
+            </tbody>
           </table>
+
+          <!-- Footer -->
+          <div class="footer">
+            <span>Generated on ${generatedDate}</span>
+            <span>${BS_MONTHS_EN[selectedMonth - 1]} ${selectedYear} &nbsp;·&nbsp; Total ${attendanceRecords.length} records</span>
+          </div>
+
         </body>
       </html>
     `);
@@ -343,6 +565,9 @@ export default function AdminUserAttendanceDetail() {
                   Check Out
                 </th>
                 <th className="p-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                  Duration
+                </th>
+                <th className="p-3 text-left text-xs font-semibold text-gray-500 uppercase">
                   Status
                 </th>
                 <th className="p-3 text-left text-xs font-semibold text-gray-500 uppercase">
@@ -353,13 +578,13 @@ export default function AdminUserAttendanceDetail() {
             <tbody className="divide-y divide-gray-50">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="p-8 text-center text-gray-400">
+                  <td colSpan={7} className="p-8 text-center text-gray-400">
                     Loading...
                   </td>
                 </tr>
               ) : attendanceRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-8 text-center text-gray-400">
+                  <td colSpan={7} className="p-8 text-center text-gray-400">
                     No attendance records found for this month
                   </td>
                 </tr>
@@ -369,15 +594,10 @@ export default function AdminUserAttendanceDetail() {
                   const isHoliday = record.status === "holiday";
                   const dateObj = record.date ? new Date(record.date) : null;
                   const dayNames = [
-                    "Sun",
-                    "Mon",
-                    "Tue",
-                    "Wed",
-                    "Thu",
-                    "Fri",
-                    "Sat",
+                    "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat",
                   ];
                   const dayName = dateObj ? dayNames[dateObj.getDay()] : "—";
+                  const duration = calcDuration(record.checkIn, record.checkOut);
 
                   return (
                     <tr
@@ -393,6 +613,9 @@ export default function AdminUserAttendanceDetail() {
                       </td>
                       <td className="p-3 text-sm text-gray-700">
                         {toNPT(record.checkOut)}
+                      </td>
+                      <td className="p-3 text-sm font-semibold text-blue-600">
+                        {duration}
                       </td>
                       <td className="p-3">
                         {record.status === "present" && record.isLate ? (
