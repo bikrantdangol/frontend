@@ -8,6 +8,12 @@ import { Calendar, CheckCircle, XCircle, Clock, Printer } from "lucide-react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
+// ─── Month name arrays ────────────────────────────────────────────────────────
+const BS_MONTHS_NP = [
+  "बैशाख","जेठ","असार","साउन","भदौ","असोज",
+  "कार्तिक","मंसिर","पुष","माघ","फागुन","चैत",
+];
+
 const toNPT = (utcDate) => {
   if (!utcDate) return "—";
   return new Date(utcDate).toLocaleTimeString("en-US", {
@@ -46,7 +52,6 @@ const TEXT = {
     noRecords:       "No attendance records found for this month",
     otIn:            "OT In",
     otOut:           "OT Out",
-    // status badges
     statusPresent:   "Present",
     statusLate:      "Late",
     statusAbsent:    "Absent",
@@ -54,15 +59,19 @@ const TEXT = {
     statusHoliday:   "Holiday",
     statusWeekend:   "Weekend",
     statusHalfDay:   "Half Day",
-    // remarks
     remarkLateEarly: "Late in & early out",
     remarkLate:      "Late check-in",
     remarkEarly:     "Early check-out",
     otLabel:         "OT",
     // PDF
-    pdfTitle:        (month, year) => `Attendance Report - ${month} ${year}`,
-    pdfEmployee:     "Employee",
-    pdfGenerated:    "Generated",
+    pdfTitle:        "Attendance Report",
+    pdfRecords:      (n) => `${n} records`,
+    pdfDateLabel:    "Date Generated",
+    pdfPresent:      "Present",
+    pdfLate:         "Late",
+    pdfAbsent:       "Absent",
+    pdfTotalDays:    "Total Days",
+    pdfSN:           "#",
     pdfDateBS:       "Date (BS)",
     pdfDay:          "Day",
     pdfCheckIn:      "Check In",
@@ -70,9 +79,11 @@ const TEXT = {
     pdfWorked:       "Worked",
     pdfStatus:       "Status",
     pdfRemarks:      "Remarks",
-    pdfPresent:      "Present Days",
-    pdfLate:         "Late Days",
-    pdfAbsent:       "Absent Days",
+    pdfGenerated:    (date) => `Generated on ${date}`,
+    pdfTotal:        (n) => `Total ${n} records`,
+    pdfRole:         "Role",
+    workedUnit:      (h, m) => `${h}h ${String(m).padStart(2,"0")}m`,
+    otUnit:          (h, m) => `OT: ${h}h ${m}m`,
   },
   np: {
     pageTitle:       "मेरो हाजिरी",
@@ -94,7 +105,6 @@ const TEXT = {
     noRecords:       "यो महिनाका लागि कुनै हाजिरी रेकर्ड भेटिएन",
     otIn:            "OT इन",
     otOut:           "OT आउट",
-    // status badges
     statusPresent:   "उपस्थित",
     statusLate:      "ढिलो",
     statusAbsent:    "अनुपस्थित",
@@ -102,25 +112,31 @@ const TEXT = {
     statusHoliday:   "बिदा",
     statusWeekend:   "सप्ताहन्त",
     statusHalfDay:   "आधा दिन",
-    // remarks
     remarkLateEarly: "ढिलो आउनु र चाँडो जानु",
     remarkLate:      "ढिलो चेक-इन",
     remarkEarly:     "चाँडो चेक-आउट",
     otLabel:         "OT",
-    // PDF (keep English for print)
-    pdfTitle:        (month, year) => `Attendance Report - ${month} ${year}`,
-    pdfEmployee:     "Employee",
-    pdfGenerated:    "Generated",
-    pdfDateBS:       "Date (BS)",
-    pdfDay:          "Day",
-    pdfCheckIn:      "Check In",
-    pdfCheckOut:     "Check Out",
-    pdfWorked:       "Worked",
-    pdfStatus:       "Status",
-    pdfRemarks:      "Remarks",
-    pdfPresent:      "Present Days",
-    pdfLate:         "Late Days",
-    pdfAbsent:       "Absent Days",
+    // PDF
+    pdfTitle:        "हाजिरी रिपोर्ट",
+    pdfRecords:      (n) => `${n} रेकर्डहरू`,
+    pdfDateLabel:    "मिति तयार गरिएको",
+    pdfPresent:      "उपस्थित",
+    pdfLate:         "ढिलो",
+    pdfAbsent:       "अनुपस्थित",
+    pdfTotalDays:    "कुल दिनहरू",
+    pdfSN:           "क्र.सं.",
+    pdfDateBS:       "मिति (बि.सं.)",
+    pdfDay:          "दिन",
+    pdfCheckIn:      "आगमन",
+    pdfCheckOut:     "प्रस्थान",
+    pdfWorked:       "काम गरेको",
+    pdfStatus:       "स्थिति",
+    pdfRemarks:      "कैफियत",
+    pdfGenerated:    (date) => `तयार गरिएको: ${date}`,
+    pdfTotal:        (n) => `जम्मा ${n} रेकर्डहरू`,
+    pdfRole:         "भूमिका",
+    workedUnit:      (h, m) => `${h}घ ${String(m).padStart(2,"0")}मि`,
+    otUnit:          (h, m) => `OT: ${h}घ ${m}मि`,
   },
 };
 
@@ -135,6 +151,9 @@ export default function UserAttendancePage() {
   const { lang }        = useLang();
   const t               = TEXT[lang] || TEXT.en;
   const today           = getTodayBS();
+
+  // Use correct month names based on lang
+  const BS_MONTHS = lang === "np" ? BS_MONTHS_NP : BS_MONTHS_EN;
 
   const [selectedYear,       setSelectedYear]       = useState(today.year);
   const [selectedMonth,      setSelectedMonth]      = useState(today.month);
@@ -186,10 +205,10 @@ export default function UserAttendancePage() {
   const getRemarks = (record) => {
     const parts = [];
     if (record.isLate && record.isEarlyLeave) parts.push(t.remarkLateEarly);
-    else if (record.isLate)        parts.push(t.remarkLate);
-    else if (record.isEarlyLeave)  parts.push(t.remarkEarly);
+    else if (record.isLate)       parts.push(t.remarkLate);
+    else if (record.isEarlyLeave) parts.push(t.remarkEarly);
     const ot = record.overtimeMinutes || 0;
-    if (ot > 0) parts.push(`${t.otLabel}: ${Math.floor(ot / 60)}${lang === "np" ? "घ" : "h"} ${ot % 60}${lang === "np" ? "मि" : "m"}`);
+    if (ot > 0) parts.push(t.otUnit(Math.floor(ot / 60), ot % 60));
     return parts.length > 0 ? parts.join(" · ") : "—";
   };
 
@@ -198,75 +217,189 @@ export default function UserAttendancePage() {
     if (status === "present" && isLate)
       return <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-700"><Clock size={12} /> {t.statusLate}</span>;
     const map = {
-      present:   <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700"><CheckCircle size={12} /> {t.statusPresent}</span>,
-      absent:    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700"><XCircle size={12} /> {t.statusAbsent}</span>,
-      "on-leave":<span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700"><Clock size={12} /> {t.statusOnLeave}</span>,
-      holiday:   <span className="px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">{t.statusHoliday}</span>,
-      weekend:   <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-500">{t.statusWeekend}</span>,
-      "half-day":<span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">{t.statusHalfDay}</span>,
+      present:    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700"><CheckCircle size={12} /> {t.statusPresent}</span>,
+      absent:     <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700"><XCircle size={12} /> {t.statusAbsent}</span>,
+      "on-leave": <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700"><Clock size={12} /> {t.statusOnLeave}</span>,
+      holiday:    <span className="px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">{t.statusHoliday}</span>,
+      weekend:    <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-500">{t.statusWeekend}</span>,
+      "half-day": <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">{t.statusHalfDay}</span>,
     };
     return map[status] || <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">—</span>;
   };
 
-  // ── PDF export (always English for official doc) ──────────────────────────
+  // ── PDF export — landscape, blue header, emp bar, pills, styled table ─────
   const exportPDF = () => {
-    const title = t.pdfTitle(BS_MONTHS_EN[selectedMonth - 1], selectedYear);
-    const tableRows = attendanceRecords.map((r) => {
-      const s  = r.status || "absent";
-      const bg = s === "present" ? "#D1FAE5" : s === "absent" ? "#FEE2E2" : "#FEF3C7";
-      const cl = s === "present" ? "#065F46" : s === "absent" ? "#991B1B" : "#92400E";
-      const remarkStr = (() => {
-        const parts = [];
-        if (r.isLate && r.isEarlyLeave) parts.push("Late in & early out");
-        else if (r.isLate)       parts.push("Late check-in");
-        else if (r.isEarlyLeave) parts.push("Early check-out");
-        const ot = r.overtimeMinutes || 0;
-        if (ot > 0) parts.push(`OT: ${Math.floor(ot/60)}h ${ot%60}m`);
-        return parts.join(" · ") || "—";
-      })();
-      const workedStr = (() => {
-        const total = (r.workingMinutes || 0) + (r.overtimeMinutes || 0);
-        if (!total) return "—";
-        return `${Math.floor(total/60)}h ${total%60}m`;
-      })();
-      return `<tr>
-        <td>${r.nepaliDate || "—"}</td>
-        <td>${r.dayName || "—"}</td>
-        <td>${toNPT(r.checkIn)}</td>
-        <td>${toNPT(r.checkOut)}</td>
-        <td>${workedStr}</td>
-        <td><span style="background:${bg};color:${cl};padding:2px 8px;border-radius:20px">${s.charAt(0).toUpperCase()+s.slice(1)}</span></td>
-        <td>${remarkStr}</td>
+    const monthName    = BS_MONTHS[selectedMonth - 1];
+    const userName     = user?.fullName || user?.name || (lang === "np" ? "अज्ञात" : "Unknown");
+    const userRole     = user?.role
+      ? user.role.charAt(0).toUpperCase() + user.role.slice(1)
+      : "—";
+    const generatedDate = new Date().toLocaleDateString(
+      lang === "np" ? "ne-NP" : "en-US",
+      { year: "numeric", month: "long", day: "numeric" },
+    );
+
+    // Status badge for PDF
+    const statusBadgePDF = (status, isLate) => {
+      const styles = {
+        present:    { bg: "#D1FAE5", color: "#065F46" },
+        absent:     { bg: "#FEE2E2", color: "#991B1B" },
+        "on-leave": { bg: "#DBEAFE", color: "#1E40AF" },
+        holiday:    { bg: "#EDE9FE", color: "#5B21B6" },
+        weekend:    { bg: "#F3F4F6", color: "#6B7280" },
+        "half-day": { bg: "#FEF9C3", color: "#854D0E" },
+      };
+      const isLatePresent = isLate && status === "present";
+      const key   = isLatePresent ? "present" : status;
+      const label = isLatePresent
+        ? t.pdfLate
+        : (() => {
+            const map = {
+              present:    t.pdfPresent,
+              absent:     t.pdfAbsent,
+              "on-leave": t.statusOnLeave,
+              holiday:    t.statusHoliday,
+              weekend:    t.statusWeekend,
+              "half-day": t.statusHalfDay,
+            };
+            return map[status] || (status ? status.charAt(0).toUpperCase() + status.slice(1) : "—");
+          })();
+      const s = styles[key] || { bg: "#F3F4F6", color: "#374151" };
+      return `<span style="background:${s.bg};color:${s.color};padding:2px 10px;border-radius:20px;font-size:10.5px;font-weight:600;white-space:nowrap;">${label}</span>`;
+    };
+
+    const tableRows = attendanceRecords.map((r, i) => {
+      const isOffDay   = r.status === "weekend" || r.status === "holiday";
+      const checkInStr = isOffDay
+        ? (r.checkIn ? `${t.otIn}: ${toNPT(r.checkIn)}` : "—")
+        : toNPT(r.checkIn);
+      const checkOutStr = isOffDay
+        ? (r.checkOut ? `${t.otOut}: ${toNPT(r.checkOut)}` : "—")
+        : toNPT(r.checkOut);
+
+      const total = (r.workingMinutes || 0) + (r.overtimeMinutes || 0);
+      const workedStr = total
+        ? t.workedUnit(Math.floor(total / 60), total % 60)
+        : "—";
+
+      const remarkParts = [];
+      if (r.isLate && r.isEarlyLeave) remarkParts.push(t.remarkLateEarly);
+      else if (r.isLate)       remarkParts.push(t.remarkLate);
+      else if (r.isEarlyLeave) remarkParts.push(t.remarkEarly);
+      const ot = r.overtimeMinutes || 0;
+      if (ot > 0) remarkParts.push(t.otUnit(Math.floor(ot / 60), ot % 60));
+      const remarkStr = remarkParts.join(" · ") || "—";
+
+      const rowBg = i % 2 === 0 ? "#ffffff" : "#f9fafb";
+      return `
+      <tr style="background:${rowBg};">
+        <td style="border:1px solid #e5e7eb;padding:6px 9px;text-align:center;color:#9ca3af;">${i + 1}</td>
+        <td style="border:1px solid #e5e7eb;padding:6px 9px;font-weight:600;">${r.nepaliDate || "—"}</td>
+        <td style="border:1px solid #e5e7eb;padding:6px 9px;color:#6b7280;">${r.dayName || "—"}</td>
+        <td style="border:1px solid #e5e7eb;padding:6px 9px;">${checkInStr}</td>
+        <td style="border:1px solid #e5e7eb;padding:6px 9px;">${checkOutStr}</td>
+        <td style="border:1px solid #e5e7eb;padding:6px 9px;text-align:center;font-weight:700;color:#1d4ed8;">${workedStr}</td>
+        <td style="border:1px solid #e5e7eb;padding:6px 9px;text-align:center;">${statusBadgePDF(r.status, r.isLate)}</td>
+        <td style="border:1px solid #e5e7eb;padding:6px 9px;color:#6b7280;font-size:10.5px;">${remarkStr}</td>
       </tr>`;
     }).join("");
 
     const win = window.open("", "_blank");
-    win.document.write(`<html><head><title>${title}</title><style>
-      body{font-family:Arial;margin:40px}
-      h1{color:#1F2937;font-size:24px;margin-bottom:8px}
-      .stats{display:flex;gap:20px;margin:20px 0}
-      .stat{padding:12px 20px;border:1px solid #E5E7EB;border-radius:12px}
-      .stat-val{font-size:24px;font-weight:bold}
-      .stat-lbl{font-size:12px;color:#6B7280;margin-top:4px}
-      table{width:100%;border-collapse:collapse;margin-top:20px}
-      th,td{border:1px solid #ddd;padding:8px;text-align:left}
-      th{background:#F9FAFB;font-weight:600}
-      footer{margin-top:30px;padding-top:15px;border-top:1px solid #E5E7EB;font-size:11px;color:#9CA3AF;text-align:center}
-    </style></head><body>
-      <h1>${title}</h1>
-      <p>${t.pdfEmployee}: ${user?.fullName || user?.name} (${user?.email})</p>
-      <p>${t.pdfGenerated}: ${new Date().toLocaleString()}</p>
-      <div class="stats">
-        <div class="stat"><div class="stat-val" style="color:#059669">${stats.present}</div><div class="stat-lbl">${t.pdfPresent}</div></div>
-        <div class="stat"><div class="stat-val" style="color:#D97706">${stats.late}</div><div class="stat-lbl">${t.pdfLate}</div></div>
-        <div class="stat"><div class="stat-val" style="color:#DC2626">${stats.absent}</div><div class="stat-lbl">${t.pdfAbsent}</div></div>
-      </div>
-      <table><thead><tr>
-        <th>${t.pdfDateBS}</th><th>${t.pdfDay}</th><th>${t.pdfCheckIn}</th><th>${t.pdfCheckOut}</th>
-        <th>${t.pdfWorked}</th><th>${t.pdfStatus}</th><th>${t.pdfRemarks}</th>
-      </tr></thead><tbody>${tableRows}</tbody></table>
-      <footer>MirmiraHRMS - Attendance Report</footer>
-    </body></html>`);
+    win.document.write(`
+      <html>
+        <head>
+          <title>${t.pdfTitle} — ${monthName} ${selectedYear}</title>
+          <style>
+            @page { size: A4 landscape; margin: 14mm 12mm; }
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body { font-family: 'Noto Sans Devanagari','Segoe UI',Arial,sans-serif; font-size: 12px; color: #1f2937; background: #fff; }
+
+            .page-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; padding-bottom:12px; border-bottom:2.5px solid #1d4ed8; }
+            .page-header-left h1 { font-size:19px; font-weight:700; color:#1d4ed8; }
+            .page-header-left p  { font-size:11.5px; color:#6b7280; margin-top:3px; }
+            .page-header-right   { text-align:right; font-size:11px; color:#6b7280; line-height:1.8; }
+            .page-header-right .date-label { font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#9ca3af; }
+            .page-header-right .date-value { font-size:12.5px; font-weight:700; color:#1f2937; }
+
+            .emp-bar { display:flex; align-items:center; gap:14px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:9px 14px; margin-bottom:14px; }
+            .emp-avatar { width:40px; height:40px; background:#1d4ed8; color:white; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:17px; font-weight:700; flex-shrink:0; }
+            .emp-name { font-size:14px; font-weight:700; color:#1e3a8a; }
+            .emp-role { font-size:10.5px; color:#2563eb; background:#dbeafe; padding:2px 10px; border-radius:20px; display:inline-block; margin-top:3px; font-weight:600; }
+
+            .summary { display:flex; gap:10px; margin-bottom:14px; }
+            .pill { flex:1; border-radius:8px; padding:7px 12px; text-align:center; }
+            .pill .val { font-size:19px; font-weight:700; }
+            .pill .lbl { font-size:9.5px; letter-spacing:0.3px; margin-top:2px; }
+            .pill-green  { background:#d1fae5; color:#065f46; }
+            .pill-orange { background:#ffedd5; color:#9a3412; }
+            .pill-red    { background:#fee2e2; color:#991b1b; }
+            .pill-blue   { background:#dbeafe; color:#1e40af; }
+
+            table { width:100%; border-collapse:collapse; font-size:11.5px; }
+            thead tr { background:#1d4ed8; color:white; }
+            th { padding:8px 9px; text-align:left; font-weight:600; font-size:10.5px; border:1px solid #1e40af; }
+            td { border:1px solid #e5e7eb; padding:6px 9px; vertical-align:middle; }
+
+            .footer { margin-top:22px; display:flex; justify-content:space-between; font-size:10.5px; color:#9ca3af; border-top:1px solid #e5e7eb; padding-top:8px; }
+          </style>
+        </head>
+        <body>
+
+          <!-- Page header -->
+          <div class="page-header">
+            <div class="page-header-left">
+              <h1>${t.pdfTitle}</h1>
+              <p>${monthName} ${selectedYear} &nbsp;·&nbsp; ${t.pdfRecords(attendanceRecords.length)}</p>
+            </div>
+            <div class="page-header-right">
+              <div class="date-label">${t.pdfDateLabel}</div>
+              <div class="date-value">${generatedDate}</div>
+            </div>
+          </div>
+
+          <!-- Employee bar -->
+          <div class="emp-bar">
+            <div class="emp-avatar">${userName.charAt(0).toUpperCase()}</div>
+            <div>
+              <div class="emp-name">${userName}</div>
+              <div class="emp-role">${userRole}</div>
+            </div>
+          </div>
+
+          <!-- Summary pills -->
+          <div class="summary">
+            <div class="pill pill-green"><div class="val">${stats.present}</div><div class="lbl">${t.pdfPresent}</div></div>
+            <div class="pill pill-orange"><div class="val">${stats.late}</div><div class="lbl">${t.pdfLate}</div></div>
+            <div class="pill pill-red"><div class="val">${stats.absent}</div><div class="lbl">${t.pdfAbsent}</div></div>
+            <div class="pill pill-blue"><div class="val">${attendanceRecords.length}</div><div class="lbl">${t.pdfTotalDays}</div></div>
+          </div>
+
+          <!-- Table -->
+          <table>
+            <thead>
+              <tr>
+                <th style="width:32px;">${t.pdfSN}</th>
+                <th style="width:88px;">${t.pdfDateBS}</th>
+                <th style="width:48px;">${t.pdfDay}</th>
+                <th style="width:74px;">${t.pdfCheckIn}</th>
+                <th style="width:74px;">${t.pdfCheckOut}</th>
+                <th style="width:72px;">${t.pdfWorked}</th>
+                <th style="width:86px;">${t.pdfStatus}</th>
+                <th>${t.pdfRemarks}</th>
+              </tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+
+          <!-- Footer -->
+          <div class="footer">
+            <span>${t.pdfGenerated(generatedDate)}</span>
+            <span>${monthName} ${selectedYear} &nbsp;·&nbsp; ${t.pdfTotal(attendanceRecords.length)}</span>
+          </div>
+
+        </body>
+      </html>
+    `);
     win.document.close();
     win.print();
   };
@@ -306,7 +439,9 @@ export default function UserAttendancePage() {
         <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">◀</button>
         <div className="flex items-center gap-2">
           <Calendar size={18} className="text-gray-400" />
-          <span className="font-semibold text-gray-800">{BS_MONTHS_EN[selectedMonth - 1]} {selectedYear}</span>
+          <span className="font-semibold text-gray-800">
+            {BS_MONTHS[selectedMonth - 1]} {selectedYear}
+          </span>
         </div>
         <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">▶</button>
       </div>
