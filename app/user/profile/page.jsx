@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import { useApp, ROLE_META } from "../../../lib/context";
+import { useLang } from "../../../lib/LangContext";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
@@ -17,62 +18,57 @@ import {
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 const ROLE_CHIP = {
-  admin: "bg-blue-50 text-blue-800",
-  manager: "bg-indigo-50 text-indigo-800",
-  collector: "bg-cyan-50 text-cyan-800",
+  admin:      "bg-blue-50 text-blue-800",
+  manager:    "bg-indigo-50 text-indigo-800",
+  collector:  "bg-cyan-50 text-cyan-800",
   accountant: "bg-purple-50 text-purple-800",
-  helper: "bg-amber-50 text-amber-800",
-  staff: "bg-green-50 text-green-800",
+  helper:     "bg-amber-50 text-amber-800",
+  staff:      "bg-green-50 text-green-800",
 };
 
-const INFO_ROWS = (user) => [
-  {
-    icon: <Mail size={16} />,
-    label: "Email Address",
-    value: user?.email,
-    iconCls: "bg-blue-50 text-blue-600",
+// ─── Translations ─────────────────────────────────────────────────────────────
+const TEXT = {
+  en: {
+    title:            "My Profile",
+    subtitle:         "Your account information",
+    emailLabel:       "Email Address",
+    roleLabel:        "Role",
+    employeeIdLabel:  "Employee ID",
+    memberSinceLabel: "Member Since",
+    uploadSuccess:    "Profile picture updated!",
+    changeHint:       "Click on the profile picture to change it",
+    logout:           "Logout",
+    footer:           "Profile information is managed by your administrator",
   },
-  {
-    icon: <Briefcase size={16} />,
-    label: "Role",
-    value: ROLE_META?.[user?.role]?.label || user?.role,
-    iconCls: "bg-green-50 text-green-600",
+  np: {
+    title:            "मेरो प्रोफाइल",
+    subtitle:         "तपाईंको खाता जानकारी",
+    emailLabel:       "इमेल ठेगाना",
+    roleLabel:        "भूमिका",
+    employeeIdLabel:  "कर्मचारी आईडी",
+    memberSinceLabel: "सदस्य भएको मिति",
+    uploadSuccess:    "प्रोफाइल तस्बिर अपडेट भयो!",
+    changeHint:       "तस्बिर बदल्न प्रोफाइल फोटोमा क्लिक गर्नुहोस्",
+    logout:           "लगआउट",
+    footer:           "प्रोफाइल जानकारी तपाईंको प्रशासकद्वारा व्यवस्थापन गरिन्छ",
   },
-  {
-    icon: <CreditCard size={16} />,
-    label: "Employee ID",
-    value: user?.employeeId || "—",
-    iconCls: "bg-amber-50 text-amber-600",
-  },
-  {
-    icon: <Calendar size={16} />,
-    label: "Member Since",
-    value: user?.createdAt
-      ? new Date(user.createdAt).toLocaleDateString("en-US", {
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        })
-      : "—",
-    iconCls: "bg-orange-50 text-orange-600",
-  },
-];
+};
 
 export default function UserProfilePage() {
   const { user, token, logout, setUser } = useApp();
+  const { lang } = useLang();
+  const t = TEXT[lang] || TEXT.en;
   const router = useRouter();
   const fileInputRef = useRef(null);
 
-  const [photoUrl, setPhotoUrl] = useState(user?.photoUrl || null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadSuccess, setUploadSuccess] = useState(false);
+  const [photoUrl,       setPhotoUrl]       = useState(user?.photoUrl || null);
+  const [uploading,      setUploading]      = useState(false);
+  const [uploadSuccess,  setUploadSuccess]  = useState(false);
 
   // Keep photo in sync if context updates
   useEffect(() => {
     Promise.resolve().then(() => {
-      if (user?.photoUrl) {
-        setPhotoUrl(user.photoUrl);
-      }
+      if (user?.photoUrl) setPhotoUrl(user.photoUrl);
     });
   }, [user?.photoUrl]);
 
@@ -97,7 +93,11 @@ export default function UserProfilePage() {
     if (!file) return;
 
     if (file.size > 100 * 1024) {
-      alert("Photo must be less than 100 KB. Please resize the image.");
+      alert(
+        lang === "np"
+          ? "तस्बिर १०० KB भन्दा कम हुनुपर्छ। कृपया तस्बिर रिसाइज गर्नुहोस्।"
+          : "Photo must be less than 100 KB. Please resize the image.",
+      );
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
@@ -121,7 +121,10 @@ export default function UserProfilePage() {
       setUploadSuccess(true);
       setTimeout(() => setUploadSuccess(false), 3000);
     } catch (err) {
-      alert("Photo upload failed: " + err.message);
+      alert(
+        (lang === "np" ? "तस्बिर अपलोड असफल: " : "Photo upload failed: ") +
+          err.message,
+      );
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -134,18 +137,53 @@ export default function UserProfilePage() {
   };
 
   const initial =
-    user?.fullName?.[0]?.toUpperCase() || user?.name?.[0]?.toUpperCase() || "U";
+    user?.fullName?.[0]?.toUpperCase() ||
+    user?.name?.[0]?.toUpperCase() ||
+    "U";
 
   const roleChipCls = ROLE_CHIP[user?.role] || "bg-gray-100 text-gray-700";
+
+  // Info rows — rebuilt whenever lang changes
+  const infoRows = [
+    {
+      icon:    <Mail size={16} />,
+      label:   t.emailLabel,
+      value:   user?.email,
+      iconCls: "bg-blue-50 text-blue-600",
+    },
+    {
+      icon:    <Briefcase size={16} />,
+      label:   t.roleLabel,
+      value:   ROLE_META?.[user?.role]?.label || user?.role,
+      iconCls: "bg-green-50 text-green-600",
+    },
+    {
+      icon:    <CreditCard size={16} />,
+      label:   t.employeeIdLabel,
+      value:   user?.employeeId || "—",
+      iconCls: "bg-amber-50 text-amber-600",
+    },
+    {
+      icon:    <Calendar size={16} />,
+      label:   t.memberSinceLabel,
+      value:   user?.createdAt
+        ? new Date(user.createdAt).toLocaleDateString(
+            lang === "np" ? "ne-NP" : "en-US",
+            { year: "numeric", month: "long", day: "numeric" },
+          )
+        : "—",
+      iconCls: "bg-orange-50 text-orange-600",
+    },
+  ];
 
   return (
     <div className="max-w-lg mx-auto space-y-4 pb-8">
       {/* Header */}
       <div>
         <h1 className="text-xl font-extrabold text-gray-900 tracking-tight">
-          My Profile
+          {t.title}
         </h1>
-        <p className="text-sm text-gray-500 mt-0.5">Your account information</p>
+        <p className="text-sm text-gray-500 mt-0.5">{t.subtitle}</p>
       </div>
 
       {/* Hero card */}
@@ -173,12 +211,7 @@ export default function UserProfilePage() {
                 <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               ) : photoUrl ? (
                 <div className="relative w-full h-full">
-                  <Image
-                    src={photoUrl}
-                    alt="Profile"
-                    fill
-                    className="object-cover"
-                  />
+                  <Image src={photoUrl} alt="Profile" fill className="object-cover" />
                 </div>
               ) : (
                 initial
@@ -206,7 +239,7 @@ export default function UserProfilePage() {
           {/* Upload success */}
           {uploadSuccess && (
             <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg text-xs font-semibold text-green-700">
-              <Check size={13} /> Profile picture updated!
+              <Check size={13} /> {t.uploadSuccess}
             </div>
           )}
 
@@ -228,14 +261,14 @@ export default function UserProfilePage() {
           </div>
 
           <p className="mt-2 flex items-center gap-1 text-xs text-gray-400">
-            <User size={10} /> Click on the profile picture to change it
+            <User size={10} /> {t.changeHint}
           </p>
         </div>
       </div>
 
       {/* Info rows */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden divide-y divide-gray-100">
-        {INFO_ROWS(user).map((row, i) => (
+        {infoRows.map((row, i) => (
           <div
             key={i}
             className="flex items-center gap-4 px-5 py-4 hover:bg-gray-50 transition-colors"
@@ -262,12 +295,10 @@ export default function UserProfilePage() {
         onClick={handleLogout}
         className="w-full py-3.5 bg-white border border-red-200 text-red-600 text-sm font-bold rounded-xl hover:bg-red-600 hover:text-white hover:border-red-600 transition-all flex items-center justify-center gap-2 shadow-sm"
       >
-        <LogOut size={16} /> Logout
+        <LogOut size={16} /> {t.logout}
       </button>
 
-      <p className="text-center text-xs text-gray-400 pb-2">
-        Profile information is managed by your administrator
-      </p>
+      <p className="text-center text-xs text-gray-400 pb-2">{t.footer}</p>
     </div>
   );
 }
