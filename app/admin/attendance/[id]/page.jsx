@@ -16,7 +16,6 @@ import { useParams } from "next/navigation";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
-// ─── Month / Day name arrays ──────────────────────────────────────────────────
 const BS_MONTHS_NP = [
   "बैशाख","जेठ","असार","साउन","भदौ","असोज",
   "कार्तिक","मंसिर","पुष","माघ","फागुन","चैत",
@@ -24,7 +23,6 @@ const BS_MONTHS_NP = [
 const DAY_NAMES_NP = ["आइत","सोम","मंगल","बुध","बिहि","शुक्र","शनि"];
 const DAY_NAMES_EN = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
-// ─── Translations ─────────────────────────────────────────────────────────────
 const TEXT = {
   en: {
     pageTitle:        "Attendance Details",
@@ -60,7 +58,6 @@ const TEXT = {
     legendPresent:    "Present",
     legendLate:       "Late",
     legendAbsent:     "Absent",
-    // PDF strings
     pdfTitle:         "Attendance Report",
     pdfRecords:       (n) => `${n} records`,
     pdfDateLabel:     "Date Generated",
@@ -115,7 +112,6 @@ const TEXT = {
     legendPresent:    "उपस्थित",
     legendLate:       "ढिलो",
     legendAbsent:     "अनुपस्थित",
-    // PDF strings
     pdfTitle:         "हाजिरी रिपोर्ट",
     pdfRecords:       (n) => `${n} रेकर्डहरू`,
     pdfDateLabel:     "मिति तयार गरिएको",
@@ -138,7 +134,6 @@ const TEXT = {
   },
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 const toNPT = (utcDate) => {
   if (!utcDate) return "—";
   return new Date(utcDate).toLocaleTimeString("en-US", {
@@ -158,7 +153,6 @@ const calcDuration = (checkIn, checkOut, t) => {
   return t.durationUnit(hours, mins.toString().padStart(2, "0"));
 };
 
-// ─── Component ────────────────────────────────────────────────────────────────
 export default function AdminUserAttendanceDetail() {
   const params = useParams();
   const userId = params.userId || params.id;
@@ -167,7 +161,6 @@ export default function AdminUserAttendanceDetail() {
   const t = TEXT[lang] || TEXT.en;
   const today = getTodayBS();
 
-  // Month name arrays based on current lang
   const BS_MONTHS = lang === "np" ? BS_MONTHS_NP : BS_MONTHS_EN;
   const DAY_NAMES = lang === "np" ? DAY_NAMES_NP : DAY_NAMES_EN;
 
@@ -178,7 +171,6 @@ export default function AdminUserAttendanceDetail() {
   const [loading,           setLoading]           = useState(true);
   const [stats,             setStats]             = useState({ present: 0, late: 0, absent: 0, rate: 0 });
 
-  // 1. Fetch user info
   useEffect(() => {
     if (!token || !userId) return;
     fetch(`${API}/api/users/${userId}`, {
@@ -189,7 +181,6 @@ export default function AdminUserAttendanceDetail() {
       .catch(console.error);
   }, [token, userId]);
 
-  // 2. Fetch attendance summary
   useEffect(() => {
     if (!token || !userId) return;
     const loadAttendance = async () => {
@@ -220,7 +211,6 @@ export default function AdminUserAttendanceDetail() {
     loadAttendance();
   }, [token, userId, selectedYear, selectedMonth]);
 
-  // Month navigation
   const prevMonth = () => {
     if (selectedMonth === 1) { setSelectedMonth(12); setSelectedYear((y) => y - 1); }
     else setSelectedMonth((m) => m - 1);
@@ -230,7 +220,6 @@ export default function AdminUserAttendanceDetail() {
     else setSelectedMonth((m) => m + 1);
   };
 
-  // ── Status label helper (used by both PDF and UI) ──────────────────────────
   const getStatusLabel = (status, isLate) => {
     if (isLate && status === "present") return t.late;
     const map = {
@@ -244,7 +233,6 @@ export default function AdminUserAttendanceDetail() {
     return map[status] || status || "—";
   };
 
-  // ── Remarks helper ─────────────────────────────────────────────────────────
   const getRemarks = (record) => {
     const parts = [];
     if (record.isLate && record.isEarlyLeave)       parts.push(t.lateAndEarly);
@@ -258,7 +246,7 @@ export default function AdminUserAttendanceDetail() {
     return parts.join(" · ") || "—";
   };
 
-  // ── PDF Export ─────────────────────────────────────────────────────────────
+  // ── PDF Export (UPDATED) ───────────────────────────────────────────────────
   const exportPDF = () => {
     const printWindow = window.open("", "_blank");
     const userName = user?.fullName || user?.name || (lang === "np" ? "अज्ञात" : "Unknown");
@@ -278,6 +266,7 @@ export default function AdminUserAttendanceDetail() {
       (r) => !r.checkIn && !r.checkOut &&
         r.status !== "weekend" && r.status !== "holiday" && r.status !== "on-leave",
     ).length;
+    const totalCount = attendanceRecords.length;
 
     const statusBadgePDF = (status, isLate) => {
       const styles = {
@@ -325,43 +314,61 @@ export default function AdminUserAttendanceDetail() {
             @page { size: A4 landscape; margin: 14mm 12mm; }
             * { box-sizing: border-box; margin: 0; padding: 0; }
             body { font-family: 'Noto Sans Devanagari','Segoe UI',Arial,sans-serif; font-size: 12px; color: #1f2937; background: #fff; }
-            .page-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; padding-bottom:12px; border-bottom:2.5px solid #1d4ed8; }
-            .page-header-left h1 { font-size:19px; font-weight:700; color:#1d4ed8; }
-            .page-header-left p  { font-size:11.5px; color:#6b7280; margin-top:3px; }
-            .page-header-right   { text-align:right; font-size:11px; color:#6b7280; line-height:1.8; }
-            .page-header-right .date-label { font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:#9ca3af; }
-            .page-header-right .date-value { font-size:12.5px; font-weight:700; color:#1f2937; }
-            .emp-bar { display:flex; align-items:center; gap:14px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:9px 14px; margin-bottom:14px; }
-            .emp-avatar { width:40px; height:40px; background:#1d4ed8; color:white; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:17px; font-weight:700; flex-shrink:0; }
-            .emp-name { font-size:14px; font-weight:700; color:#1e3a8a; }
-            .emp-role { font-size:10.5px; color:#2563eb; background:#dbeafe; padding:2px 10px; border-radius:20px; display:inline-block; margin-top:3px; font-weight:600; }
-            .summary { display:flex; gap:10px; margin-bottom:14px; }
+
+            /* Letterhead */
+            .letterhead { text-align: center; padding-bottom: 10px; border-bottom: 2px solid #1e3a8a; margin-bottom: 6px; }
+            .letterhead .org-name { font-size: 20px; font-weight: 800; color: #1e3a8a; letter-spacing: 0.3px; }
+            .letterhead .org-address { font-size: 11px; color: #374151; margin-top: 3px; }
+            .letterhead .org-tel { font-size: 11px; color: #374151; }
+
+            /* Report title block */
+            .report-title-block { text-align: center; margin: 8px 0 4px; border-bottom: 1.5px solid #1e3a8a; padding-bottom: 8px; }
+            .report-title-block .report-title { font-size: 15px; font-weight: 700; color: #1e3a8a; }
+            .report-title-block .report-period { font-size: 11.5px; color: #374151; margin-top: 2px; }
+            .report-title-block .report-summary { font-size: 10.5px; color: #6b7280; margin-top: 3px; }
+
+            /* Employee summary */
+            .section-label { font-size: 11.5px; font-weight: 700; color: #1e3a8a; margin: 10px 0 6px; }
+            .emp-bar { display:flex; align-items:center; gap:14px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:8px 14px; margin-bottom:10px; }
+            .emp-avatar { width:38px; height:38px; background:#1d4ed8; color:white; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:700; flex-shrink:0; }
+            .emp-name { font-size:13px; font-weight:700; color:#1e3a8a; }
+            .emp-role { font-size:10px; color:#2563eb; background:#dbeafe; padding:2px 10px; border-radius:20px; display:inline-block; margin-top:3px; font-weight:600; }
+
+            /* Stats pills */
+            .summary { display:flex; gap:10px; margin-bottom:12px; }
             .pill { flex:1; border-radius:8px; padding:7px 12px; text-align:center; }
-            .pill .val { font-size:19px; font-weight:700; }
+            .pill .val { font-size:18px; font-weight:700; }
             .pill .lbl { font-size:9.5px; letter-spacing:0.3px; margin-top:2px; }
             .pill-green  { background:#d1fae5; color:#065f46; }
             .pill-orange { background:#ffedd5; color:#9a3412; }
             .pill-red    { background:#fee2e2; color:#991b1b; }
             .pill-blue   { background:#dbeafe; color:#1e40af; }
+
+            /* Table */
             table { width:100%; border-collapse:collapse; font-size:11.5px; }
             thead tr { background:#1d4ed8; color:white; }
             th { padding:8px 9px; text-align:left; font-weight:600; font-size:10.5px; border:1px solid #1e40af; }
             td { border:1px solid #e5e7eb; padding:6px 9px; vertical-align:middle; }
-            .footer { margin-top:22px; display:flex; justify-content:space-between; font-size:10.5px; color:#9ca3af; border-top:1px solid #e5e7eb; padding-top:8px; }
+
+            /* Footer */
+            .footer { margin-top:16px; display:flex; justify-content:space-between; font-size:10.5px; color:#9ca3af; border-top:1px solid #e5e7eb; padding-top:8px; }
           </style>
         </head>
         <body>
-          <div class="page-header">
-            <div class="page-header-left">
-              <h1>${t.pdfTitle}</h1>
-              <p>${monthName} ${selectedYear} &nbsp;·&nbsp; ${t.pdfRecords(attendanceRecords.length)}</p>
-            </div>
-            <div class="page-header-right">
-              <div class="date-label">${t.pdfDateLabel}</div>
-              <div class="date-value">${generatedDate}</div>
-            </div>
+
+          <div class="letterhead">
+            <div class="org-name">Mirmire Saving &amp; Credit Co-operative Ltd.</div>
+            <div class="org-address">Tokha, Saraswati-2, Kathmandu</div>
+            <div class="org-tel">Tel: 01-5110048</div>
           </div>
 
+          <div class="report-title-block">
+            <div class="report-title">${t.pdfTitle}</div>
+            <div class="report-period">Period: ${monthName} ${selectedYear}</div>
+            <div class="report-summary">Total Days: ${totalCount} &nbsp;|&nbsp; Present: ${presentCount} &nbsp;|&nbsp; Late: ${lateCount} &nbsp;|&nbsp; Absent: ${absentCount}</div>
+          </div>
+
+          <div class="section-label">Employee Summary</div>
           <div class="emp-bar">
             <div class="emp-avatar">${userName.charAt(0).toUpperCase()}</div>
             <div>
@@ -374,7 +381,7 @@ export default function AdminUserAttendanceDetail() {
             <div class="pill pill-green"><div class="val">${presentCount}</div><div class="lbl">${t.pdfPresent}</div></div>
             <div class="pill pill-orange"><div class="val">${lateCount}</div><div class="lbl">${t.pdfLate}</div></div>
             <div class="pill pill-red"><div class="val">${absentCount}</div><div class="lbl">${t.pdfAbsent}</div></div>
-            <div class="pill pill-blue"><div class="val">${attendanceRecords.length}</div><div class="lbl">${t.pdfTotalDays}</div></div>
+            <div class="pill pill-blue"><div class="val">${totalCount}</div><div class="lbl">${t.pdfTotalDays}</div></div>
           </div>
 
           <table>
@@ -395,8 +402,9 @@ export default function AdminUserAttendanceDetail() {
 
           <div class="footer">
             <span>${t.pdfGenerated(generatedDate)}</span>
-            <span>${monthName} ${selectedYear} &nbsp;·&nbsp; ${t.pdfTotal(attendanceRecords.length)}</span>
+            <span>${monthName} ${selectedYear} &nbsp;·&nbsp; ${t.pdfTotal(totalCount)}</span>
           </div>
+
         </body>
       </html>
     `);
@@ -404,7 +412,6 @@ export default function AdminUserAttendanceDetail() {
     printWindow.print();
   };
 
-  // ── Loading state ──────────────────────────────────────────────────────────
   if (!user) {
     return (
       <div className="p-6 space-y-6 max-w-6xl mx-auto">
@@ -425,7 +432,6 @@ export default function AdminUserAttendanceDetail() {
   const userName = user.fullName || user.name || (lang === "np" ? "अज्ञात" : "Unknown");
   const monthName = BS_MONTHS[selectedMonth - 1];
 
-  // ── On-screen status badge ─────────────────────────────────────────────────
   const statusBadgeUI = (status, isLate) => {
     if (isLate && status === "present")
       return <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-700"><Clock size={12} /> {t.late}</span>;
@@ -444,7 +450,6 @@ export default function AdminUserAttendanceDetail() {
     return <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">—</span>;
   };
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
 

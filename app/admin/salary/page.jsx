@@ -1,23 +1,13 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "../../../lib/context";
 import { useLang } from "../../../lib/LangContext";
 import SalarySettingModal from "@/components/SalarySettingModal";
 
 const MONTHS = [
-  "बैशाख",
-  "जेठ",
-  "असार",
-  "श्रावण",
-  "भाद्र",
-  "आश्विन",
-  "कार्तिक",
-  "मंसिर",
-  "पुष",
-  "माघ",
-  "फाल्गुन",
-  "चैत्र",
+  "बैशाख","जेठ","असार","श्रावण","भाद्र","आश्विन",
+  "कार्तिक","मंसिर","पुष","माघ","फाल्गुन","चैत्र",
 ];
 
 const YEARS = Array.from({ length: 10 }, (_, i) => String(2080 + i));
@@ -25,11 +15,11 @@ const YEARS = Array.from({ length: 10 }, (_, i) => String(2080 + i));
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 const ROLE_COLORS = {
-  manager: "bg-amber-100 text-amber-700 border-amber-200",
+  manager:   "bg-amber-100 text-amber-700 border-amber-200",
   collector: "bg-cyan-100 text-cyan-700 border-cyan-200",
-  accountant: "bg-emerald-100 text-emerald-700 border-emerald-200",
-  helper: "bg-violet-100 text-violet-700 border-violet-200",
-  staff: "bg-pink-100 text-pink-700 border-pink-200",
+  accountant:"bg-emerald-100 text-emerald-700 border-emerald-200",
+  helper:    "bg-violet-100 text-violet-700 border-violet-200",
+  staff:     "bg-pink-100 text-pink-700 border-pink-200",
 };
 
 const TEXT = {
@@ -103,174 +93,225 @@ const TEXT = {
   },
 };
 
+// ── shared fetch helper ───────────────────────────────────────────────────────
+async function apiFetch(path, token, options = {}) {
+  const res = await fetch(`${API}${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+    },
+  });
+  if (!res.ok) throw new Error(`API error ${res.status}: ${path}`);
+  return res.json();
+}
+
+// ── build overrides from users + overtime list ────────────────────────────────
+function buildOverrides(users, overtimeList, bonusEnabled, bonusAmount) {
+  const overrides = {};
+  users.forEach((u) => {
+    const ot = overtimeList.find((o) => String(o._id) === String(u._id));
+    overrides[u._id] = {
+      salary: u.baseSalary || 0,
+      bonus: bonusEnabled ? bonusAmount : 0,
+      overtimeHours: ot ? Number(ot.overtimeHours) : 0,
+    };
+  });
+  return overrides;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 export default function SalaryPage() {
-  const router = useRouter();
+  const router    = useRouter();
   const { token } = useApp();
-  const { lang } = useLang();
+  const { lang }  = useLang();
   const t = TEXT[lang] || TEXT.en;
 
   const [selectedMonth, setSelectedMonth] = useState(MONTHS[0]);
-  const [selectedYear, setSelectedYear] = useState("2081");
-  const [salaryModal, setSalaryModal] = useState(false);
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [otLoading, setOtLoading] = useState(false);
-
+  const [selectedYear,  setSelectedYear]  = useState("2081");
+  const [salaryModal,   setSalaryModal]   = useState(false);
+  const [users,         setUsers]         = useState([]);
+  const [loading,       setLoading]       = useState(true);
+  const [otLoading,     setOtLoading]     = useState(false);
+  const [userOverrides, setUserOverrides] = useState({});
   const [settings, setSettings] = useState({
-    bonusEnabled: false,
-    bonusAmount: 0,
+    bonusEnabled:    false,
+    bonusAmount:     0,
     overtimeEnabled: false,
-    overtimeRate: 0,
-    taxRate: 1,
+    overtimeRate:    0,
+    taxRate:         1,
   });
 
-  const [userOverrides, setUserOverrides] = useState({});
+  // stable ref so async callbacks always read latest settings
+  const settingsRef = useRef(settings);
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
 
-  // ── 1. Fetch salary config once on mount ──────────────────────────────────
+  // track whether initial load has run
+  const initialLoadDone = useRef(false);
+
+  // ── 1. fetch config once on mount ──────────────────────────────────────
   useEffect(() => {
     if (!token) return;
-    fetch(`${API}/api/salary/config`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((res) => res.json())
+    apiFetch("/api/salary/config", token)
       .then((data) => {
-        if (data && typeof data === "object" && !data.message) {
+        if (data && !data.message) {
           setSettings({
-            bonusEnabled: data.bonusEnabled || false,
-            bonusAmount: data.bonusAmount || 0,
-            overtimeEnabled: data.overtimeEnabled || false,
-            overtimeRate: data.overtimeRate || 0,
-            taxRate: data.taxRate || 1,
+            bonusEnabled:    Boolean(data.bonusEnabled),
+            bonusAmount:     data.bonusAmount    || 0,
+            overtimeEnabled: Boolean(data.overtimeEnabled),
+            overtimeRate:    data.overtimeRate   || 0,
+            taxRate:         data.taxRate        || 1,
           });
         }
       })
       .catch(console.error);
   }, [token]);
 
-  // ── 2. Fetch users once ───────────────────────────────────────────────────
-  const fetchUsers = useCallback(async () => {
+  // ── 2. fetch users + overtime together (runs on mount and month/year change)
+  const fetchAll = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/users`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      const fetchedUsers = data.users || [];
-      setUsers(fetchedUsers);
+      const monthIndex = MONTHS.indexOf(selectedMonth) + 1;
+      const [usersData, overtimeList] = await Promise.all([
+        apiFetch("/api/users", token),
+        apiFetch(
+          `/api/salary/overtime?nepaliYear=${selectedYear}&nepaliMonth=${monthIndex}`,
+          token
+        ).catch(() => []),
+      ]);
 
-      // Build initial overrides with base salary only — overtime filled separately
-      const initialOverrides = {};
-      fetchedUsers.forEach((u) => {
-        initialOverrides[u._id] = {
-          salary: u.baseSalary || 0,
-          bonus: 0,
-          overtimeHours: 0,
-        };
-      });
-      setUserOverrides(initialOverrides);
+      const fetchedUsers = usersData.users || [];
+      const s = settingsRef.current;
+
+      // one setState call — no cascade
+      setUsers(fetchedUsers);
+      setUserOverrides(
+        buildOverrides(
+          fetchedUsers,
+          Array.isArray(overtimeList) ? overtimeList : [],
+          s.bonusEnabled,
+          s.bonusAmount
+        )
+      );
+      initialLoadDone.current = true;
     } catch (err) {
-      console.error("Failed to fetch users:", err);
+      console.error("fetchAll error:", err);
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, selectedMonth, selectedYear]);
 
+  // useEffect(() => {
+  //   fetchAll();
+  // }, [fetchAll]);
   useEffect(() => {
-    fetchUsers();
-  }, [fetchUsers]);
+  const fetchAll = async () => {
+    if (!token) return;
 
+    setLoading(true);
+
+    try {
+      const monthIndex = MONTHS.indexOf(selectedMonth) + 1;
+
+      const [usersData, overtimeList] = await Promise.all([
+        apiFetch("/api/users", token),
+        apiFetch(
+          `/api/salary/overtime?nepaliYear=${selectedYear}&nepaliMonth=${monthIndex}`,
+          token
+        ).catch(() => []),
+      ]);
+
+      const fetchedUsers = usersData.users || [];
+      const s = settingsRef.current;
+
+      setUsers(fetchedUsers);
+
+      setUserOverrides(
+        buildOverrides(
+          fetchedUsers,
+          Array.isArray(overtimeList) ? overtimeList : [],
+          s.bonusEnabled,
+          s.bonusAmount
+        )
+      );
+
+      initialLoadDone.current = true;
+    } catch (error) {
+      console.error("fetchAll error:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchAll();
+}, [token, selectedMonth, selectedYear]);
+
+  // ── 3. re-fetch overtime only when month/year changes after initial load ─
   useEffect(() => {
-    if (!token || users.length === 0) return;
+    if (!initialLoadDone.current || !token || users.length === 0) return;
 
     const monthIndex = MONTHS.indexOf(selectedMonth) + 1;
     setOtLoading(true);
 
-    console.log("Fetching OT for:", selectedYear, monthIndex); // debug
-
-    fetch(
-      `${API}/api/salary/overtime?nepaliYear=${selectedYear}&nepaliMonth=${monthIndex}`,
-      { headers: { Authorization: `Bearer ${token}` } },
+    apiFetch(
+      `/api/salary/overtime?nepaliYear=${selectedYear}&nepaliMonth=${monthIndex}`,
+      token
     )
-      .then((res) => res.json())
-      .then((overtimeData) => {
-        console.log("OT data received:", overtimeData); // debug — check this in console
-
-        if (!Array.isArray(overtimeData)) return;
-
+      .then((overtimeList) => {
+        if (!Array.isArray(overtimeList)) return;
         setUserOverrides((prev) => {
-          const updated = { ...prev };
+          const next = { ...prev };
           users.forEach((u) => {
-            const otEntry = overtimeData.find(
-              (ot) => String(ot._id) === String(u._id),
-            );
-            console.log("User:", u.fullName, "OT entry:", otEntry); // debug
-            updated[u._id] = {
-              ...updated[u._id],
-              overtimeHours: otEntry ? Number(otEntry.overtimeHours) : 0,
+            const ot = overtimeList.find((o) => String(o._id) === String(u._id));
+            next[u._id] = {
+              ...next[u._id],
+              overtimeHours: ot ? Number(ot.overtimeHours) : 0,
             };
           });
-          return updated;
+          return next;
         });
       })
-      .catch((e) => console.error("Overtime fetch error:", e))
+      .catch(console.error)
       .finally(() => setOtLoading(false));
-  }, [token, selectedMonth, selectedYear, users.length]);
+  }, [selectedMonth, selectedYear]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── 4. Sync bonus when global settings change ─────────────────────────────
-  useEffect(() => {
-    if (settings.bonusEnabled) {
-      setUserOverrides((prev) => {
-        const updated = { ...prev };
-        Object.keys(updated).forEach((id) => {
-          updated[id] = { ...updated[id], bonus: settings.bonusAmount };
-        });
-        return updated;
-      });
-    }
-  }, [settings.bonusEnabled, settings.bonusAmount]);
-
-  const handleOverride = (userId, field, value) => {
+  // ── handlers ─────────────────────────────────────────────────────────────
+  const handleOverride = (userId, field, rawValue) => {
     setUserOverrides((prev) => ({
       ...prev,
-      [userId]: { ...prev[userId], [field]: parseFloat(value) || 0 },
+      [userId]: { ...prev[userId], [field]: parseFloat(rawValue) || 0 },
     }));
   };
 
   const computeRow = (user) => {
-    const override = userOverrides[user._id] || {
-      salary: 0,
-      bonus: 0,
-      overtimeHours: 0,
-    };
-    const salary = override.salary;
-    const bonus = settings.bonusEnabled
-      ? (override.bonus ?? settings.bonusAmount)
+    const ov       = userOverrides[user._id] || { salary: 0, bonus: 0, overtimeHours: 0 };
+    const salary   = ov.salary;
+    const bonus    = settings.bonusEnabled ? (ov.bonus ?? settings.bonusAmount) : 0;
+    const overtime = settings.overtimeEnabled && settings.overtimeRate > 0
+      ? ov.overtimeHours * settings.overtimeRate
       : 0;
-    const overtime =
-      settings.overtimeEnabled && settings.overtimeRate > 0
-        ? override.overtimeHours * settings.overtimeRate
-        : 0;
-    const total = salary + bonus + overtime;
-    return { salary, bonus, overtime, total };
+    return { salary, bonus, overtime, total: salary + bonus + overtime };
   };
+
+  const grandTotal = users.reduce((s, u) => s + computeRow(u).total, 0);
 
   const handleViewSheet = () => {
     const payload = {
       month: selectedMonth,
-      year: selectedYear,
+      year:  selectedYear,
       settings,
       rows: users.map((u) => ({
-        id: u._id,
-        name: u.fullName,
-        role: u.role,
-        email: u.email,
-        biometricId: u.biometricId,
-        employeeId: u.employeeId,
+        id:            u._id,
+        name:          u.fullName,
+        role:          u.role,
+        email:         u.email,
+        biometricId:   u.biometricId,
+        employeeId:    u.employeeId,
         ...computeRow(u),
         overtimeHours: userOverrides[u._id]?.overtimeHours || 0,
-        salary: userOverrides[u._id]?.salary || 0,
-        bonus: userOverrides[u._id]?.bonus || 0,
+        salary:        userOverrides[u._id]?.salary        || 0,
+        bonus:         userOverrides[u._id]?.bonus         || 0,
       })),
     };
     if (typeof window !== "undefined")
@@ -278,21 +319,27 @@ export default function SalaryPage() {
     router.push("/admin/salary/sheet");
   };
 
-  const grandTotal = users.reduce((s, u) => s + (computeRow(u).total || 0), 0);
+  const handleSaveSettings = async (s) => {
+    try {
+      await apiFetch("/api/salary/config", token, {
+        method: "PUT",
+        body: JSON.stringify(s),
+      });
+    } catch (e) {
+      console.error("Failed to save salary config:", e);
+    }
+    setSettings(s);
+  };
 
   const tableHeaders = [
-    t.colNum,
-    t.colName,
-    t.colRole,
-    t.colBaseSalary,
-    t.colBonus,
-    t.colOvertimeHrs,
-    t.colOvertimePay,
-    t.colTotal,
+    t.colNum, t.colName, t.colRole, t.colBaseSalary,
+    t.colBonus, t.colOvertimeHrs, t.colOvertimePay, t.colTotal,
   ];
 
+  // ── render ───────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-white text-gray-900 font-sans">
+
       {/* Breadcrumb */}
       <div className="border-b border-gray-200 px-6 py-4 flex items-center gap-2 text-sm text-gray-400 bg-gray-50">
         <span>{t.breadcrumbAdmin}</span>
@@ -301,12 +348,11 @@ export default function SalaryPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-8">
+
         {/* Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
-              {t.pageTitle}
-            </h1>
+            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{t.pageTitle}</h1>
             <p className="text-gray-500 text-sm mt-1">{t.pageDesc}</p>
           </div>
           <div className="flex items-center gap-3">
@@ -314,24 +360,9 @@ export default function SalaryPage() {
               onClick={() => setSalaryModal(true)}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-gray-200 text-sm font-medium text-gray-600 hover:text-gray-900 hover:border-gray-400 transition-all shadow-sm"
             >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                />
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                />
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
               {t.salarySettings}
             </button>
@@ -339,70 +370,45 @@ export default function SalaryPage() {
               onClick={handleViewSheet}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold transition-all shadow-md shadow-blue-200"
             >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                />
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
               {t.viewSheet}
             </button>
           </div>
         </div>
 
-        {/* Month / Year + Badges */}
+        {/* Month / Year Selector */}
         <div className="bg-gray-50 border border-gray-200 rounded-2xl p-5 mb-6">
-          <p className="text-xs font-semibold text-blue-600 uppercase tracking-widest mb-4">
-            {t.payPeriod}
-          </p>
+          <p className="text-xs font-semibold text-blue-600 uppercase tracking-widest mb-4">{t.payPeriod}</p>
           <div className="flex flex-wrap gap-3 items-end">
+
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-gray-500 font-medium">
-                {t.monthLabel}
-              </label>
+              <label className="text-xs text-gray-500 font-medium">{t.monthLabel}</label>
               <select
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
-                className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all min-w-[160px] cursor-pointer shadow-sm"
+                className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all min-w-160px cursor-pointer shadow-sm"
               >
-                {MONTHS.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-gray-500 font-medium">
-                {t.yearLabel}
-              </label>
-              <select
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(e.target.value)}
-                className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all min-w-[120px] cursor-pointer shadow-sm"
-              >
-                {YEARS.map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
+                {MONTHS.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
 
-            {/* Loading indicator when overtime is being fetched */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-gray-500 font-medium">{t.yearLabel}</label>
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(e.target.value)}
+                className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all min-w-120px cursor-pointer shadow-sm"
+              >
+                {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+
             {otLoading && (
               <div className="flex items-center gap-2 pb-0.5">
                 <div className="w-3 h-3 rounded-full border-2 border-violet-300 border-t-violet-600 animate-spin" />
-                <span className="text-xs text-violet-500">
-                  Loading overtime…
-                </span>
+                <span className="text-xs text-violet-500">Loading overtime…</span>
               </div>
             )}
 
@@ -464,17 +470,10 @@ export default function SalaryPage() {
               border: "border-violet-100",
             },
           ].map((c) => (
-            <div
-              key={c.label}
-              className={`${c.bg} border ${c.border} rounded-xl p-4`}
-            >
-              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-                {c.label}
-              </p>
+            <div key={c.label} className={`${c.bg} border ${c.border} rounded-xl p-4`}>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">{c.label}</p>
               <p className={`text-lg font-bold ${c.color}`}>{c.value}</p>
-              {c.suffix && (
-                <p className="text-xs text-gray-400 mt-0.5">{c.suffix}</p>
-              )}
+              {c.suffix && <p className="text-xs text-gray-400 mt-0.5">{c.suffix}</p>}
             </div>
           ))}
         </div>
@@ -482,9 +481,7 @@ export default function SalaryPage() {
         {/* Salary Table */}
         <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
           <div className="p-5 border-b border-gray-100 bg-gray-50">
-            <h2 className="text-sm font-semibold text-gray-800">
-              {t.tableTitle}
-            </h2>
+            <h2 className="text-sm font-semibold text-gray-800">{t.tableTitle}</h2>
             <p className="text-xs text-gray-400 mt-0.5">{t.tableDesc}</p>
           </div>
 
@@ -502,10 +499,7 @@ export default function SalaryPage() {
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50">
                     {tableHeaders.map((h) => (
-                      <th
-                        key={h}
-                        className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap"
-                      >
+                      <th key={h} className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                         {h}
                       </th>
                     ))}
@@ -514,66 +508,47 @@ export default function SalaryPage() {
                 <tbody className="divide-y divide-gray-100">
                   {users.map((user, idx) => {
                     const row = computeRow(user);
+                    const ov  = userOverrides[user._id] || {};
                     return (
-                      <tr
-                        key={user._id}
-                        className="hover:bg-gray-50 transition-colors"
-                      >
-                        <td className="px-5 py-4 text-gray-400 text-sm">
-                          {idx + 1}
-                        </td>
+                      <tr key={user._id} className="hover:bg-gray-50 transition-colors">
+
+                        <td className="px-5 py-4 text-gray-400 text-sm">{idx + 1}</td>
+
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-100 to-violet-100 border border-gray-200 flex items-center justify-center text-xs font-bold text-blue-700">
+                            <div className="w-8 h-8 rounded-full `bg-gradient-to-br` from-blue-100 to-violet-100 border border-gray-200 flex items-center justify-center text-xs font-bold text-blue-700">
                               {(user.fullName || "?")[0]?.toUpperCase()}
                             </div>
-                            <span className="text-sm font-medium text-gray-800 whitespace-nowrap">
-                              {user.fullName}
-                            </span>
+                            <span className="text-sm font-medium text-gray-800 whitespace-nowrap">{user.fullName}</span>
                           </div>
                         </td>
+
                         <td className="px-5 py-4">
-                          <span
-                            className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${ROLE_COLORS[user.role] || "bg-gray-100 text-gray-600 border-gray-200"}`}
-                          >
-                            {user.role?.charAt(0).toUpperCase() +
-                              user.role?.slice(1)}
+                          <span className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${ROLE_COLORS[user.role] || "bg-gray-100 text-gray-600 border-gray-200"}`}>
+                            {user.role?.charAt(0).toUpperCase() + user.role?.slice(1)}
                           </span>
                         </td>
+
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-1.5">
                             <span className="text-xs text-gray-400">NPR</span>
                             <input
                               type="number"
-                              value={userOverrides[user._id]?.salary || 0}
-                              onChange={(e) =>
-                                handleOverride(
-                                  user._id,
-                                  "salary",
-                                  e.target.value,
-                                )
-                              }
+                              value={ov.salary || 0}
+                              onChange={(e) => handleOverride(user._id, "salary", e.target.value)}
                               className="w-28 bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all"
                             />
                           </div>
                         </td>
+
                         <td className="px-5 py-4">
                           {settings.bonusEnabled ? (
                             <div className="flex items-center gap-1.5">
                               <span className="text-xs text-gray-400">NPR</span>
                               <input
                                 type="number"
-                                value={
-                                  userOverrides[user._id]?.bonus ??
-                                  settings.bonusAmount
-                                }
-                                onChange={(e) =>
-                                  handleOverride(
-                                    user._id,
-                                    "bonus",
-                                    e.target.value,
-                                  )
-                                }
+                                value={ov.bonus ?? settings.bonusAmount}
+                                onChange={(e) => handleOverride(user._id, "bonus", e.target.value)}
                                 className="w-28 bg-white border border-emerald-200 rounded-lg px-3 py-1.5 text-gray-800 text-sm focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition-all"
                               />
                             </div>
@@ -581,48 +556,36 @@ export default function SalaryPage() {
                             <span className="text-gray-300 text-sm">—</span>
                           )}
                         </td>
+
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-1.5">
                             <input
                               type="number"
-                              value={
-                                userOverrides[user._id]?.overtimeHours || 0
-                              }
-                              onChange={(e) =>
-                                handleOverride(
-                                  user._id,
-                                  "overtimeHours",
-                                  e.target.value,
-                                )
-                              }
+                              value={ov.overtimeHours || 0}
+                              onChange={(e) => handleOverride(user._id, "overtimeHours", e.target.value)}
                               className="w-20 bg-white border border-violet-200 rounded-lg px-3 py-1.5 text-gray-800 text-sm focus:outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 transition-all"
                               min="0"
                               step="0.1"
                               readOnly={!settings.overtimeEnabled}
                               style={{
-                                borderColor: settings.overtimeEnabled
-                                  ? undefined
-                                  : "#e5e7eb",
-                                color: settings.overtimeEnabled
-                                  ? undefined
-                                  : "#6b7280",
+                                borderColor: settings.overtimeEnabled ? undefined : "#e5e7eb",
+                                color:       settings.overtimeEnabled ? undefined : "#6b7280",
                               }}
                             />
                             <span className="text-xs text-gray-400">hrs</span>
                           </div>
                         </td>
+
                         <td className="px-5 py-4 text-sm text-violet-600 font-medium whitespace-nowrap">
                           {settings.overtimeEnabled && row.overtime > 0 ? (
                             `NPR ${row.overtime.toLocaleString()}`
-                          ) : userOverrides[user._id]?.overtimeHours > 0 &&
-                            !settings.overtimeEnabled ? (
-                            <span className="text-xs text-amber-500">
-                              Enable OT rate
-                            </span>
+                          ) : ov.overtimeHours > 0 && !settings.overtimeEnabled ? (
+                            <span className="text-xs text-amber-500">Enable OT rate</span>
                           ) : (
                             <span className="text-gray-300">—</span>
                           )}
                         </td>
+
                         <td className="px-5 py-4 text-sm text-blue-600 font-bold whitespace-nowrap">
                           NPR {row.total.toLocaleString()}
                         </td>
@@ -632,10 +595,7 @@ export default function SalaryPage() {
                 </tbody>
                 <tfoot>
                   <tr className="border-t-2 border-gray-200 bg-gray-50">
-                    <td
-                      colSpan={7}
-                      className="px-5 py-4 text-sm font-semibold text-gray-500 text-right"
-                    >
+                    <td colSpan={7} className="px-5 py-4 text-sm font-semibold text-gray-500 text-right">
                       {t.grandTotal}
                     </td>
                     <td className="px-5 py-4 text-base font-bold text-blue-700 whitespace-nowrap">
@@ -652,21 +612,7 @@ export default function SalaryPage() {
       <SalarySettingModal
         isOpen={salaryModal}
         onClose={() => setSalaryModal(false)}
-        onSave={async (s) => {
-          try {
-            await fetch(`${API}/api/salary/config`, {
-              method: "PUT",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify(s),
-            });
-          } catch (e) {
-            console.error("Failed to save salary config:", e);
-          }
-          setSettings(s);
-        }}
+        onSave={handleSaveSettings}
         existingSettings={settings}
       />
     </div>
