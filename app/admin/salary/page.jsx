@@ -22,7 +22,7 @@ const MONTHS = [
 
 const YEARS = Array.from({ length: 10 }, (_, i) => String(2080 + i));
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://mirmire.onrender.com";
 
 // Approximate AD → BS current month/year (BS months start around these AD dates).
 // Used only for the default selection; the user can still change it.
