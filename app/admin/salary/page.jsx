@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "../../../lib/context";
 import { useLang } from "../../../lib/LangContext";
@@ -23,6 +23,34 @@ const MONTHS = [
 const YEARS = Array.from({ length: 10 }, (_, i) => String(2080 + i));
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
+// Approximate AD → BS current month/year (BS months start around these AD dates).
+// Used only for the default selection; the user can still change it.
+const BS_MONTH_STARTS = [
+  [4, 14], [5, 15], [6, 15], [7, 17], [8, 17], [9, 17],
+  [10, 18], [11, 17], [12, 16], [1, 14], [2, 12], [3, 14],
+];
+
+function getCurrentBS() {
+  const now = new Date();
+  const m = now.getMonth() + 1;
+  const d = now.getDate();
+  let idx = 0;
+  for (let i = 0; i < 12; i++) {
+    const [sm, sd] = BS_MONTH_STARTS[i];
+    if (m > sm || (m === sm && d >= sd)) idx = i;
+  }
+  // Jan 1 → Baishakh 1 falls in BS year (AD + 56) until Apr 14, then AD + 57
+  const beforeNewYear = m < 4 || (m === 4 && d < 14);
+  let year = now.getFullYear() + (beforeNewYear ? 56 : 57);
+  // months Poush..Chaitra that fall in Jan–Apr belong to AD+56
+  if (idx >= 8 || idx === 11) year = now.getFullYear() + (m >= 4 && m <= 12 ? 57 : 56);
+  const y = String(year);
+  return {
+    month: MONTHS[idx],
+    year: YEARS.includes(y) ? y : YEARS[YEARS.length - 1],
+  };
+}
 
 const ROLE_COLORS = {
   manager: "bg-amber-100 text-amber-700 border-amber-200",
@@ -143,14 +171,15 @@ export default function SalaryPage() {
   const { lang } = useLang();
   const t = TEXT[lang] || TEXT.en;
 
-  const [selectedMonth, setSelectedMonth] = useState(MONTHS[0]);
-  const [selectedYear, setSelectedYear] = useState("2081");
+  const [selectedMonth, setSelectedMonth] = useState(() => getCurrentBS().month);
+  const [selectedYear, setSelectedYear] = useState(() => getCurrentBS().year);
   const [salaryModal, setSalaryModal] = useState(false);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [otLoading, setOtLoading] = useState(false);
   const [userOverrides, setUserOverrides] = useState({});
   const [savedRows, setSavedRows] = useState({});
+  const [configLoaded, setConfigLoaded] = useState(false);
   const [settings, setSettings] = useState({
     bonusEnabled: false,
     bonusAmount: 0,
@@ -181,69 +210,17 @@ export default function SalaryPage() {
           });
         }
       })
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => setConfigLoaded(true)); // data fetch waits for config
   }, [token]);
 
-  // ── 2. fetch users + overtime together (runs on mount and month/year change)
-  const fetchAll = useCallback(async () => {
-    if (!token) return;
-    setLoading(true);
-    try {
-      const monthIndex = MONTHS.indexOf(selectedMonth) + 1;
-      const [usersData, overtimeList, savedMonthly] = await Promise.all([
-        apiFetch("/api/users", token),
-        apiFetch(
-          `/api/salary/overtime?nepaliYear=${selectedYear}&nepaliMonth=${monthIndex}`,
-          token,
-        ).catch(() => []),
-        apiFetch(
-          `/api/salary/monthly?nepaliYear=${selectedYear}&nepaliMonth=${monthIndex}`,
-          token,
-        ).catch(() => []),
-      ]);
-
-      const fetchedUsers = usersData.users || [];
-      const s = settingsRef.current;
-
-      // one setState call — no cascade
-      setUsers(fetchedUsers);
-      const initialOverrides = buildOverrides(
-        fetchedUsers,
-        Array.isArray(overtimeList) ? overtimeList : [],
-        s.bonusEnabled,
-        s.bonusAmount,
-      );
-      const saved = Array.isArray(savedMonthly) ? savedMonthly : [];
-      saved.forEach((record) => {
-        initialOverrides[record.employee] = {
-          ...initialOverrides[record.employee],
-          salary: record.baseSalary,
-          bonus: record.bonus,
-          overtimeHours: record.overtimeHours,
-        };
-      });
-      setUserOverrides(initialOverrides);
-      setSavedRows(
-        Object.fromEntries(
-          saved.map((record) => [String(record.employee), true]),
-        ),
-      );
-      initialLoadDone.current = true;
-    } catch (err) {
-      console.error("fetchAll error:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [token, selectedMonth, selectedYear]);
-
-  // useEffect(() => {
-  //   fetchAll();
-  // }, [fetchAll]);
+  // ── 2. fetch users + overtime + saved salaries (after config is loaded) ──
   useEffect(() => {
-    const fetchAll = async () => {
-      if (!token) return;
+    if (!token || !configLoaded) return;
 
+    const fetchAll = async () => {
       setLoading(true);
+      setOtLoading(true);
 
       try {
         const monthIndex = MONTHS.indexOf(selectedMonth) + 1;
@@ -292,17 +269,19 @@ export default function SalaryPage() {
         console.error("fetchAll error:", error);
       } finally {
         setLoading(false);
+        setOtLoading(false);
       }
     };
 
     fetchAll();
-  }, [token, selectedMonth, selectedYear]);
+  }, [token, configLoaded, selectedMonth, selectedYear]);
 
   // ── handlers ─────────────────────────────────────────────────────────────
+  // Keep the raw typed value so empty fields and decimals (e.g. "1.") work while typing.
   const handleOverride = (userId, field, rawValue) => {
     setUserOverrides((prev) => ({
       ...prev,
-      [userId]: { ...prev[userId], [field]: parseFloat(rawValue) || 0 },
+      [userId]: { ...prev[userId], [field]: rawValue },
     }));
   };
 
@@ -316,14 +295,14 @@ export default function SalaryPage() {
     const socialSecurityFund = Math.round(salary * 0.2 * 100) / 100;
     const staffContribution = Math.round(salary * 0.11 * 100) / 100;
     const bonus = settings.bonusEnabled
-      ? (ov.bonus ?? settings.bonusAmount)
+      ? Number(ov.bonus ?? settings.bonusAmount) || 0
       : 0;
     const overtimeHours = settings.overtimeEnabled
       ? Number(ov.overtimeHours) || 0
       : 0;
     const overtime =
       settings.overtimeEnabled && settings.overtimeRate > 0
-        ? ov.overtimeHours * settings.overtimeRate
+        ? overtimeHours * settings.overtimeRate
         : 0;
     return {
       salary,
@@ -344,6 +323,7 @@ export default function SalaryPage() {
     const payload = {
       month: selectedMonth,
       year: selectedYear,
+      nepaliMonth: MONTHS.indexOf(selectedMonth) + 1,
       settings,
       rows: users.map((u) => ({
         id: u._id,
@@ -542,7 +522,7 @@ export default function SalaryPage() {
               <select
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
-                className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all min-w-160px cursor-pointer shadow-sm"
+                className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all min-w-[160px] cursor-pointer shadow-sm"
               >
                 {MONTHS.map((m) => (
                   <option key={m} value={m}>
@@ -559,7 +539,7 @@ export default function SalaryPage() {
               <select
                 value={selectedYear}
                 onChange={(e) => setSelectedYear(e.target.value)}
-                className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all min-w-120px cursor-pointer shadow-sm"
+                className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-gray-800 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all min-w-[120px] cursor-pointer shadow-sm"
               >
                 {YEARS.map((y) => (
                   <option key={y} value={y}>
@@ -695,7 +675,7 @@ export default function SalaryPage() {
 
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full `bg-gradient-to-br` from-blue-100 to-violet-100 border border-gray-200 flex items-center justify-center text-xs font-bold text-blue-700">
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-100 to-violet-100 border border-gray-200 flex items-center justify-center text-xs font-bold text-blue-700">
                               {(user.fullName || "?")[0]?.toUpperCase()}
                             </div>
                             <span className="text-sm font-medium text-gray-800 whitespace-nowrap">
@@ -767,7 +747,7 @@ export default function SalaryPage() {
                           <div className="flex items-center gap-1.5">
                             <input
                               type="number"
-                              value={ov.overtimeHours || 0}
+                              value={ov.overtimeHours ?? 0}
                               onChange={(e) =>
                                 handleOverride(
                                   user._id,
@@ -795,7 +775,7 @@ export default function SalaryPage() {
                         <td className="px-5 py-4 text-sm text-violet-600 font-medium whitespace-nowrap">
                           {settings.overtimeEnabled && row.overtime > 0 ? (
                             `NPR ${row.overtime.toLocaleString()}`
-                          ) : ov.overtimeHours > 0 &&
+                          ) : Number(ov.overtimeHours) > 0 &&
                             !settings.overtimeEnabled ? (
                             <span className="text-xs text-amber-500">
                               Enable OT rate

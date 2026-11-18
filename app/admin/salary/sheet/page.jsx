@@ -330,166 +330,367 @@
 //   };
 // }
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "../../../../lib/context";
 
+// ─── Read saved data from sessionStorage (no setState inside an effect) ─────
+const subscribe = () => () => {};
+const getSnapshot = () => {
+  try {
+    return window.sessionStorage.getItem("salarySheetData"); // string | null
+  } catch {
+    return null;
+  }
+};
+const getServerSnapshot = () => undefined; // undefined = not on the client yet
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
 const fmt = (value) =>
   Number(value || 0).toLocaleString("en-NP", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-const PRINT_STYLES = `@page { size: A4 portrait; margin: 16mm; } @media print { body { background: white !important; } .no-print { display: none !important; } .print-page { box-shadow: none !important; } }`;
+
+const fmtHours = (value) =>
+  Number(value || 0).toLocaleString("en-NP", { maximumFractionDigits: 2 });
+
+const pick = (row, keys) => {
+  for (const key of keys) {
+    if (row && row[key] !== undefined && row[key] !== null) return row[key];
+  }
+  return 0;
+};
+
+const PREPARED_BY = "Anjali Maharjan";
+const APPROVED_BY = "Bikram Dangol";
+
+const COLUMNS = [
+  { label: "Base Salary (NPR)", keys: ["baseSalary", "salary"] },
+  { label: "Social Security Fund (20%)", keys: ["socialSecurityFund"] },
+  { label: "Staff Contribution (11%)", keys: ["staffContribution"] },
+  { label: "Bonus (NPR)", keys: ["bonus"] },
+  { label: "Overtime (Hrs)", keys: ["overtimeHours"], hours: true },
+  { label: "Overtime Pay (NPR)", keys: ["overtimePay", "overtime"] },
+  { label: "Total Salary (NPR)", keys: ["totalSalary", "total"], strong: true },
+];
+
+const pageCss = (landscape) => `
+@page { size: A4 ${landscape ? "landscape" : "portrait"}; margin: 12mm; }
+@media print {
+  html, body { background: white !important; }
+  .no-print { display: none !important; }
+  .print-page { box-shadow: none !important; border: none !important; margin: 0 !important; }
+}
+`;
+
+const thStyle = (extra = {}) => ({
+  border: "1px solid #555",
+  padding: "5px 6px",
+  fontSize: "10px",
+  fontWeight: "bold",
+  textAlign: "center",
+  verticalAlign: "middle",
+  backgroundColor: "#000",
+  color: "#fff",
+  ...extra,
+});
+
+const tdStyle = (extra = {}) => ({
+  border: "1px solid #ccc",
+  padding: "5px 6px",
+  fontSize: "10px",
+  verticalAlign: "middle",
+  ...extra,
+});
 
 export default function SalarySheetPage() {
   const router = useRouter();
   const { token } = useApp();
-  const [data] = useState(() => {
-    if (typeof window === "undefined") return null;
-    const raw = window.sessionStorage.getItem("salarySheetData");
-    return raw ? JSON.parse(raw) : null;
-  });
+
+  const raw = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const ready = raw !== undefined;
+  const data = useMemo(() => {
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch (e) {
+      console.error(e);
+      return null;
+    }
+  }, [raw]);
+
+  const rows = data?.rows || [];
+  const isReceipt = rows.length === 1;
+
   useEffect(() => {
     const style = document.createElement("style");
-    style.innerHTML = PRINT_STYLES;
+    style.innerHTML = pageCss(!isReceipt);
     document.head.appendChild(style);
-    return () => document.head.removeChild(style);
-  }, []);
+    return () => {
+      document.head.removeChild(style);
+    };
+  }, [isReceipt]);
 
-  if (!data)
+  if (!ready) {
     return (
-      <main className="min-h-screen grid place-items-center text-gray-500">
-        No saved salary receipt found.{" "}
-        <button
-          className="text-blue-600 ml-2"
-          onClick={() => router.push("/admin/salary")}
-        >
-          Back to Salary Entry
-        </button>
+      <main className="min-h-screen grid place-items-center text-gray-400 text-sm">
+        Loading salary data…
       </main>
     );
-  const { month, year, rows = [] } = data;
+  }
+
+  if (!data) {
+    return (
+      <main className="min-h-screen grid place-items-center text-gray-500">
+        <div>
+          No saved salary data found.{" "}
+          <button
+            className="text-blue-600 ml-2"
+            onClick={() => router.push("/admin/salary")}
+          >
+            Back to Salary Entry
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  // Date comes from the Salary Entry page (selected BS month & year)
+  const { month, year } = data;
   const row = rows[0] || {};
-  const isReceipt = rows.length === 1;
-  const fields = [
-    ["Base Salary (NPR)", "baseSalary", "salary"],
-    ["Social Security Fund (20%)", "socialSecurityFund"],
-    ["Staff Contribution (11%)", "staffContribution"],
-    ["Bonus (NPR)", "bonus"],
-    ["Overtime", "overtimeHours"],
-    ["Overtime Pay (NPR)", "overtimePay", "overtime"],
-    ["Total Salary (NPR)", "totalSalary", "total"],
-  ];
+
+  const handleDownload = async () => {
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"}/api/salary/receipt/${row.id || row.employee}/download?nepaliYear=${year}&nepaliMonth=${data.nepaliMonth}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (!response.ok) throw new Error("Receipt download failed");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `salary-receipt-${row.name || "employee"}-${year}-${data.nepaliMonth}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error(error);
+      window.alert("Could not download this receipt. Please try again.");
+    }
+  };
+
+  const colValue = (item, col) => pick(item, col.keys);
+  const totals = COLUMNS.map((col) =>
+    rows.reduce((sum, item) => sum + Number(colValue(item, col) || 0), 0),
+  );
+
   return (
     <div className="min-h-screen bg-gray-100 text-gray-900">
-      <header className="no-print border-b border-gray-200 px-6 py-4 flex justify-between bg-white">
-        <button
-          onClick={() => router.push("/admin/salary")}
-          className="text-gray-600"
-        >
-          ← Back to Salary Entry
-        </button>
+      {/* Top bar */}
+      <header className="no-print border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 bg-white/95 backdrop-blur-sm z-10 shadow-sm">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => router.push("/admin/salary")}
+            className="flex items-center gap-2 text-gray-500 hover:text-gray-900 text-sm transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Back to Salary Entry
+          </button>
+          <span className="text-gray-300">|</span>
+          <h1 className="text-gray-800 font-semibold">
+            {isReceipt ? "Salary Receipt" : "Salary Sheet"} — {month} {year}
+          </h1>
+        </div>
         <div className="flex gap-2">
           {isReceipt && (
             <button
-              onClick={async () => {
-                try {
-                  const response = await fetch(
-                    `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"}/api/salary/receipt/${row.id || row.employee}/download?nepaliYear=${year}&nepaliMonth=${data.nepaliMonth}`,
-                    { headers: { Authorization: `Bearer ${token}` } },
-                  );
-                  if (!response.ok) throw new Error("Receipt download failed");
-                  const blob = await response.blob();
-                  const url = URL.createObjectURL(blob);
-                  const link = document.createElement("a");
-                  link.href = url;
-                  link.download = `salary-receipt-${row.name || "employee"}-${year}-${data.nepaliMonth}.pdf`;
-                  link.click();
-                  URL.revokeObjectURL(url);
-                } catch (error) {
-                  console.error(error);
-                  window.alert(
-                    "Could not download this receipt. Please try again.",
-                  );
-                }
-              }}
-              className="px-5 py-2 rounded-xl bg-emerald-600 text-white font-semibold"
+              onClick={handleDownload}
+              className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-all shadow-md"
             >
               Download Receipt
             </button>
           )}
           <button
             onClick={() => window.print()}
-            className="px-5 py-2 rounded-xl bg-blue-600 text-white font-semibold"
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm transition-all shadow-md shadow-blue-200"
           >
-            Print Receipt
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            {isReceipt ? "Print Receipt" : "Print / Save PDF (Landscape)"}
           </button>
         </div>
       </header>
-      <main className="print-page mx-auto my-8 max-w-3xl rounded-xl bg-white p-10 shadow-lg">
-        <div className="text-center border-b pb-5 mb-6">
-          <h1 className="text-2xl font-bold">
+
+      <div className="no-print py-6 px-6 flex justify-center">
+        <p className="text-gray-400 text-xs">
+          Preview below •{" "}
+          {isReceipt
+            ? 'Click "Print Receipt" to print in A4 portrait'
+            : 'Click "Print / Save PDF" to export in A4 landscape'}
+        </p>
+      </div>
+
+      {/* Printable sheet */}
+      <main
+        className="print-page mx-auto bg-white text-black shadow-xl rounded-lg overflow-hidden"
+        style={{
+          width: isReceipt ? "190mm" : "277mm",
+          minHeight: isReceipt ? "200mm" : "190mm",
+          padding: "14mm",
+          fontFamily: "'Times New Roman', Times, 'Noto Sans Devanagari', serif",
+          fontSize: "11px",
+        }}
+      >
+        {/* Header */}
+        <div style={{ textAlign: "center", marginBottom: "12px" }}>
+          <div
+            style={{
+              fontSize: "15px",
+              fontWeight: "bold",
+              letterSpacing: "1px",
+              borderBottom: "2px solid #000",
+              paddingBottom: "4px",
+              display: "inline-block",
+              minWidth: "400px",
+            }}
+          >
             {isReceipt ? "SALARY RECEIPT" : "SALARY SHEET"}
-          </h1>
-          <p className="text-gray-500 mt-2">
-            {month} {year}
-          </p>
-        </div>
-        {isReceipt ? (
-          <div className="mb-6 grid grid-cols-2 gap-3 text-sm">
-            <span className="text-gray-500">Employee</span>
-            <strong>{row.name}</strong>
-            <span className="text-gray-500">Role</span>
-            <strong>{row.role}</strong>
           </div>
-        ) : null}
+          <div style={{ fontSize: "12px", marginTop: "4px", color: "#333" }}>
+            Month: <strong>{month} {year}</strong>
+          </div>
+        </div>
+
         {isReceipt ? (
-          <dl>
-            {fields.map(([label, ...keys]) => (
-              <div key={label} className="flex justify-between border-b py-3">
-                <dt>{label}</dt>
-                <dd className="font-semibold">
-                  {fmt(
-                    keys.map((key) => row[key]).find((v) => v !== undefined),
-                  )}
-                </dd>
-              </div>
-            ))}
-          </dl>
+          <>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "120px 1fr",
+                gap: "6px",
+                marginBottom: "14px",
+                fontSize: "12px",
+              }}
+            >
+              <span style={{ color: "#555" }}>Employee</span>
+              <strong>{row.name}</strong>
+              <span style={{ color: "#555" }}>Designation</span>
+              <strong>{row.role}</strong>
+            </div>
+
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th style={thStyle({ textAlign: "left", fontSize: "11px" })}>Description</th>
+                  <th style={thStyle({ textAlign: "right", fontSize: "11px", width: "150px" })}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {COLUMNS.map((col, i) => (
+                  <tr key={col.label} style={{ backgroundColor: i % 2 === 0 ? "#fff" : "#f9f9f9" }}>
+                    <td style={tdStyle({ fontSize: "12px", padding: "7px 8px", fontWeight: col.strong ? "bold" : "normal" })}>
+                      {col.label}
+                    </td>
+                    <td
+                      style={tdStyle({
+                        fontSize: "12px",
+                        padding: "7px 8px",
+                        textAlign: "right",
+                        fontWeight: "bold",
+                        backgroundColor: col.strong ? "#fffbea" : undefined,
+                      })}
+                    >
+                      {col.hours ? fmtHours(colValue(row, col)) : fmt(colValue(row, col))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         ) : (
-          <table className="w-full border-collapse text-sm">
+          <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "6px" }}>
             <thead>
-              <tr className="bg-gray-900 text-white">
-                {["#", "Name", "Role", ...fields.map(([label]) => label)].map(
-                  (label) => (
-                    <th className="border p-2 text-left" key={label}>
-                      {label}
-                    </th>
-                  ),
-                )}
+              <tr>
+                <th style={thStyle({ width: "28px" })}>S.N.</th>
+                <th style={thStyle({ width: "130px", textAlign: "left" })}>Name</th>
+                <th style={thStyle({ width: "90px", textAlign: "left" })}>Designation</th>
+                {COLUMNS.map((col) => (
+                  <th key={col.label} style={thStyle({ textAlign: "right" })}>{col.label}</th>
+                ))}
+                <th style={thStyle({ width: "70px" })}>Signature</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((item, index) => (
-                <tr key={item.id || item.employee || index}>
-                  {<td className="border p-2">{index + 1}</td>}
-                  {<td className="border p-2">{item.name}</td>}
-                  {<td className="border p-2">{item.role}</td>}
-                  {fields.map(([label, ...keys]) => (
-                    <td className="border p-2 text-right" key={label}>
-                      {fmt(
-                        keys
-                          .map((key) => item[key])
-                          .find((v) => v !== undefined),
-                      )}
+              {rows.map((item, idx) => (
+                <tr
+                  key={item.id || item.employee || idx}
+                  style={{ backgroundColor: idx % 2 === 0 ? "#fff" : "#f9f9f9" }}
+                >
+                  <td style={tdStyle({ textAlign: "center" })}>{idx + 1}</td>
+                  <td style={tdStyle()}>{item.name}</td>
+                  <td style={tdStyle()}>{item.role}</td>
+                  {COLUMNS.map((col) => (
+                    <td
+                      key={col.label}
+                      style={tdStyle({
+                        textAlign: "right",
+                        fontWeight: col.strong ? "bold" : "normal",
+                        backgroundColor: col.strong ? "#fffbea" : undefined,
+                      })}
+                    >
+                      {col.hours ? fmtHours(colValue(item, col)) : fmt(colValue(item, col))}
                     </td>
                   ))}
+                  <td style={tdStyle()}></td>
                 </tr>
               ))}
+
+              <tr style={{ backgroundColor: "#000", color: "#fff", fontWeight: "bold" }}>
+                <td
+                  colSpan={3}
+                  style={tdStyle({ textAlign: "right", color: "#fff", backgroundColor: "#000", border: "1px solid #555" })}
+                >
+                  TOTAL
+                </td>
+                {COLUMNS.map((col, i) => (
+                  <td
+                    key={col.label}
+                    style={tdStyle({ textAlign: "right", color: "#fff", backgroundColor: "#000", border: "1px solid #555" })}
+                  >
+                    {col.hours ? fmtHours(totals[i]) : fmt(totals[i])}
+                  </td>
+                ))}
+                <td style={tdStyle({ backgroundColor: "#000", border: "1px solid #555" })}></td>
+              </tr>
             </tbody>
           </table>
         )}
+
+        {/* Footer */}
+        <div style={{ marginTop: "28px", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+          <div style={{ textAlign: "left" }}>
+            <div style={{ width: "160px", borderTop: "1px solid #000", paddingTop: "4px", marginTop: "30px" }}>
+              <div style={{ fontSize: "11px", fontWeight: "bold" }}>Prepared by</div>
+              <div style={{ fontSize: "11px" }}>{PREPARED_BY}</div>
+            </div>
+          </div>
+          <div style={{ textAlign: "center", fontSize: "11px", color: "#555" }}>
+            Date: {month} {year}
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ width: "160px", borderTop: "1px solid #000", paddingTop: "4px", marginTop: "30px", marginLeft: "auto" }}>
+              <div style={{ fontSize: "11px", fontWeight: "bold" }}>Approved by</div>
+              <div style={{ fontSize: "11px" }}>{APPROVED_BY}</div>
+            </div>
+          </div>
+        </div>
       </main>
+
+      <div className="no-print h-16" />
     </div>
   );
 }
