@@ -329,6 +329,371 @@
 //     ...extra,
 //   };
 // }
+// "use client";
+// import { useEffect, useMemo, useSyncExternalStore } from "react";
+// import { useRouter } from "next/navigation";
+// import { useApp } from "../../../../lib/context";
+
+// // ─── Read saved data from sessionStorage (no setState inside an effect) ─────
+// const subscribe = () => () => {};
+// const getSnapshot = () => {
+//   try {
+//     return window.sessionStorage.getItem("salarySheetData"); // string | null
+//   } catch {
+//     return null;
+//   }
+// };
+// const getServerSnapshot = () => undefined; // undefined = not on the client yet
+
+// // ─── Helpers ────────────────────────────────────────────────────────────────
+// const fmt = (value) =>
+//   Number(value || 0).toLocaleString("en-NP", {
+//     minimumFractionDigits: 2,
+//     maximumFractionDigits: 2,
+//   });
+
+// const fmtHours = (value) =>
+//   Number(value || 0).toLocaleString("en-NP", { maximumFractionDigits: 2 });
+
+// const pick = (row, keys) => {
+//   for (const key of keys) {
+//     if (row && row[key] !== undefined && row[key] !== null) return row[key];
+//   }
+//   return 0;
+// };
+
+// const PREPARED_BY = "Anjali Maharjan";
+// const APPROVED_BY = "Bikram Dangol";
+
+// const COLUMNS = [
+//   { label: "Base Salary (NPR)", keys: ["baseSalary", "salary"] },
+//   { label: "Social Security Fund (20%)", keys: ["socialSecurityFund"] },
+//   { label: "Staff Contribution (11%)", keys: ["staffContribution"] },
+//   { label: "Bonus (NPR)", keys: ["bonus"] },
+//   { label: "Overtime (Hrs)", keys: ["overtimeHours"], hours: true },
+//   { label: "Overtime Pay (NPR)", keys: ["overtimePay", "overtime"] },
+//   { label: "Total Salary (NPR)", keys: ["totalSalary", "total"], strong: true },
+// ];
+
+// const pageCss = (landscape) => `
+// @page { size: A4 ${landscape ? "landscape" : "portrait"}; margin: 12mm; }
+// @media print {
+//   html, body { background: white !important; }
+//   .no-print { display: none !important; }
+//   .print-page { box-shadow: none !important; border: none !important; margin: 0 !important; }
+// }
+// `;
+
+// const thStyle = (extra = {}) => ({
+//   border: "1px solid #555",
+//   padding: "5px 6px",
+//   fontSize: "10px",
+//   fontWeight: "bold",
+//   textAlign: "center",
+//   verticalAlign: "middle",
+//   backgroundColor: "#000",
+//   color: "#fff",
+//   ...extra,
+// });
+
+// const tdStyle = (extra = {}) => ({
+//   border: "1px solid #ccc",
+//   padding: "5px 6px",
+//   fontSize: "10px",
+//   verticalAlign: "middle",
+//   ...extra,
+// });
+
+// export default function SalarySheetPage() {
+//   const router = useRouter();
+//   const { token } = useApp();
+
+//   const raw = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+//   const ready = raw !== undefined;
+//   const data = useMemo(() => {
+//     if (!raw) return null;
+//     try {
+//       return JSON.parse(raw);
+//     } catch (e) {
+//       console.error(e);
+//       return null;
+//     }
+//   }, [raw]);
+
+//   const rows = data?.rows || [];
+//   const isReceipt = rows.length === 1;
+
+//   useEffect(() => {
+//     const style = document.createElement("style");
+//     style.innerHTML = pageCss(!isReceipt);
+//     document.head.appendChild(style);
+//     return () => {
+//       document.head.removeChild(style);
+//     };
+//   }, [isReceipt]);
+
+//   if (!ready) {
+//     return (
+//       <main className="min-h-screen grid place-items-center text-gray-400 text-sm">
+//         Loading salary data…
+//       </main>
+//     );
+//   }
+
+//   if (!data) {
+//     return (
+//       <main className="min-h-screen grid place-items-center text-gray-500">
+//         <div>
+//           No saved salary data found.{" "}
+//           <button
+//             className="text-blue-600 ml-2"
+//             onClick={() => router.push("/admin/salary")}
+//           >
+//             Back to Salary Entry
+//           </button>
+//         </div>
+//       </main>
+//     );
+//   }
+
+//   // Date comes from the Salary Entry page (selected BS month & year)
+//   const { month, year } = data;
+//   const row = rows[0] || {};
+
+//   const handleDownload = async () => {
+//     try {
+//       const response = await fetch(
+//         `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"}/api/salary/receipt/${row.id || row.employee}/download?nepaliYear=${year}&nepaliMonth=${data.nepaliMonth}`,
+//         { headers: { Authorization: `Bearer ${token}` } },
+//       );
+//       if (!response.ok) throw new Error("Receipt download failed");
+//       const blob = await response.blob();
+//       const url = URL.createObjectURL(blob);
+//       const link = document.createElement("a");
+//       link.href = url;
+//       link.download = `salary-receipt-${row.name || "employee"}-${year}-${data.nepaliMonth}.pdf`;
+//       link.click();
+//       URL.revokeObjectURL(url);
+//     } catch (error) {
+//       console.error(error);
+//       window.alert("Could not download this receipt. Please try again.");
+//     }
+//   };
+
+//   const colValue = (item, col) => pick(item, col.keys);
+//   const totals = COLUMNS.map((col) =>
+//     rows.reduce((sum, item) => sum + Number(colValue(item, col) || 0), 0),
+//   );
+
+//   return (
+//     <div className="min-h-screen bg-gray-100 text-gray-900">
+//       {/* Top bar */}
+//       <header className="no-print border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 bg-white/95 backdrop-blur-sm z-10 shadow-sm">
+//         <div className="flex items-center gap-4">
+//           <button
+//             onClick={() => router.push("/admin/salary")}
+//             className="flex items-center gap-2 text-gray-500 hover:text-gray-900 text-sm transition-colors"
+//           >
+//             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+//               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+//             </svg>
+//             Back to Salary Entry
+//           </button>
+//           <span className="text-gray-300">|</span>
+//           <h1 className="text-gray-800 font-semibold">
+//             {isReceipt ? "Salary Receipt" : "Salary Sheet"} — {month} {year}
+//           </h1>
+//         </div>
+//         <div className="flex gap-2">
+//           {isReceipt && (
+//             <button
+//               onClick={handleDownload}
+//               className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-all shadow-md"
+//             >
+//               Download Receipt
+//             </button>
+//           )}
+//           <button
+//             onClick={() => window.print()}
+//             className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm transition-all shadow-md shadow-blue-200"
+//           >
+//             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+//               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+//             </svg>
+//             {isReceipt ? "Print Receipt" : "Print / Save PDF (Landscape)"}
+//           </button>
+//         </div>
+//       </header>
+
+//       <div className="no-print py-6 px-6 flex justify-center">
+//         <p className="text-gray-400 text-xs">
+//           Preview below •{" "}
+//           {isReceipt
+//             ? 'Click "Print Receipt" to print in A4 portrait'
+//             : 'Click "Print / Save PDF" to export in A4 landscape'}
+//         </p>
+//       </div>
+
+//       {/* Printable sheet */}
+//       <main
+//         className="print-page mx-auto bg-white text-black shadow-xl rounded-lg overflow-hidden"
+//         style={{
+//           width: isReceipt ? "190mm" : "277mm",
+//           minHeight: isReceipt ? "200mm" : "190mm",
+//           padding: "14mm",
+//           fontFamily: "'Times New Roman', Times, 'Noto Sans Devanagari', serif",
+//           fontSize: "11px",
+//         }}
+//       >
+//         {/* Header */}
+//         <div style={{ textAlign: "center", marginBottom: "12px" }}>
+//           <div
+//             style={{
+//               fontSize: "15px",
+//               fontWeight: "bold",
+//               letterSpacing: "1px",
+//               borderBottom: "2px solid #000",
+//               paddingBottom: "4px",
+//               display: "inline-block",
+//               minWidth: "400px",
+//             }}
+//           >
+//             {isReceipt ? "SALARY RECEIPT" : "SALARY SHEET"}
+//           </div>
+//           <div style={{ fontSize: "12px", marginTop: "4px", color: "#333" }}>
+//             Month: <strong>{month} {year}</strong>
+//           </div>
+//         </div>
+
+//         {isReceipt ? (
+//           <>
+//             <div
+//               style={{
+//                 display: "grid",
+//                 gridTemplateColumns: "120px 1fr",
+//                 gap: "6px",
+//                 marginBottom: "14px",
+//                 fontSize: "12px",
+//               }}
+//             >
+//               <span style={{ color: "#555" }}>Employee</span>
+//               <strong>{row.name}</strong>
+//               <span style={{ color: "#555" }}>Designation</span>
+//               <strong>{row.role}</strong>
+//             </div>
+
+//             <table style={{ width: "100%", borderCollapse: "collapse" }}>
+//               <thead>
+//                 <tr>
+//                   <th style={thStyle({ textAlign: "left", fontSize: "11px" })}>Description</th>
+//                   <th style={thStyle({ textAlign: "right", fontSize: "11px", width: "150px" })}>Amount</th>
+//                 </tr>
+//               </thead>
+//               <tbody>
+//                 {COLUMNS.map((col, i) => (
+//                   <tr key={col.label} style={{ backgroundColor: i % 2 === 0 ? "#fff" : "#f9f9f9" }}>
+//                     <td style={tdStyle({ fontSize: "12px", padding: "7px 8px", fontWeight: col.strong ? "bold" : "normal" })}>
+//                       {col.label}
+//                     </td>
+//                     <td
+//                       style={tdStyle({
+//                         fontSize: "12px",
+//                         padding: "7px 8px",
+//                         textAlign: "right",
+//                         fontWeight: "bold",
+//                         backgroundColor: col.strong ? "#fffbea" : undefined,
+//                       })}
+//                     >
+//                       {col.hours ? fmtHours(colValue(row, col)) : fmt(colValue(row, col))}
+//                     </td>
+//                   </tr>
+//                 ))}
+//               </tbody>
+//             </table>
+//           </>
+//         ) : (
+//           <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "6px" }}>
+//             <thead>
+//               <tr>
+//                 <th style={thStyle({ width: "28px" })}>S.N.</th>
+//                 <th style={thStyle({ width: "130px", textAlign: "left" })}>Name</th>
+//                 <th style={thStyle({ width: "90px", textAlign: "left" })}>Designation</th>
+//                 {COLUMNS.map((col) => (
+//                   <th key={col.label} style={thStyle({ textAlign: "right" })}>{col.label}</th>
+//                 ))}
+//                 <th style={thStyle({ width: "70px" })}>Signature</th>
+//               </tr>
+//             </thead>
+//             <tbody>
+//               {rows.map((item, idx) => (
+//                 <tr
+//                   key={item.id || item.employee || idx}
+//                   style={{ backgroundColor: idx % 2 === 0 ? "#fff" : "#f9f9f9" }}
+//                 >
+//                   <td style={tdStyle({ textAlign: "center" })}>{idx + 1}</td>
+//                   <td style={tdStyle()}>{item.name}</td>
+//                   <td style={tdStyle()}>{item.role}</td>
+//                   {COLUMNS.map((col) => (
+//                     <td
+//                       key={col.label}
+//                       style={tdStyle({
+//                         textAlign: "right",
+//                         fontWeight: col.strong ? "bold" : "normal",
+//                         backgroundColor: col.strong ? "#fffbea" : undefined,
+//                       })}
+//                     >
+//                       {col.hours ? fmtHours(colValue(item, col)) : fmt(colValue(item, col))}
+//                     </td>
+//                   ))}
+//                   <td style={tdStyle()}></td>
+//                 </tr>
+//               ))}
+
+//               <tr style={{ backgroundColor: "#000", color: "#fff", fontWeight: "bold" }}>
+//                 <td
+//                   colSpan={3}
+//                   style={tdStyle({ textAlign: "right", color: "#fff", backgroundColor: "#000", border: "1px solid #555" })}
+//                 >
+//                   TOTAL
+//                 </td>
+//                 {COLUMNS.map((col, i) => (
+//                   <td
+//                     key={col.label}
+//                     style={tdStyle({ textAlign: "right", color: "#fff", backgroundColor: "#000", border: "1px solid #555" })}
+//                   >
+//                     {col.hours ? fmtHours(totals[i]) : fmt(totals[i])}
+//                   </td>
+//                 ))}
+//                 <td style={tdStyle({ backgroundColor: "#000", border: "1px solid #555" })}></td>
+//               </tr>
+//             </tbody>
+//           </table>
+//         )}
+
+//         {/* Footer */}
+//         <div style={{ marginTop: "28px", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+//           <div style={{ textAlign: "left" }}>
+//             <div style={{ width: "160px", borderTop: "1px solid #000", paddingTop: "4px", marginTop: "30px" }}>
+//               <div style={{ fontSize: "11px", fontWeight: "bold" }}>Prepared by</div>
+//               <div style={{ fontSize: "11px" }}>{PREPARED_BY}</div>
+//             </div>
+//           </div>
+//           <div style={{ textAlign: "center", fontSize: "11px", color: "#555" }}>
+//             Date: {month} {year}
+//           </div>
+//           <div style={{ textAlign: "right" }}>
+//             <div style={{ width: "160px", borderTop: "1px solid #000", paddingTop: "4px", marginTop: "30px", marginLeft: "auto" }}>
+//               <div style={{ fontSize: "11px", fontWeight: "bold" }}>Approved by</div>
+//               <div style={{ fontSize: "11px" }}>{APPROVED_BY}</div>
+//             </div>
+//           </div>
+//         </div>
+//       </main>
+
+//       <div className="no-print h-16" />
+//     </div>
+//   );
+// }
 "use client";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
@@ -362,6 +727,11 @@ const pick = (row, keys) => {
   return 0;
 };
 
+// ─── Organisation details (heading) ─────────────────────────────────────────
+const ORG_NAME = "Mirmire Saving & Credit Co-operative Ltd.";
+const ORG_ADDRESS = "Tokha, Saraswati-2, Kathmandu";
+const ORG_TEL = "Tel: 01-5110048";
+
 const PREPARED_BY = "Anjali Maharjan";
 const APPROVED_BY = "Bikram Dangol";
 
@@ -375,34 +745,30 @@ const COLUMNS = [
   { label: "Total Salary (NPR)", keys: ["totalSalary", "total"], strong: true },
 ];
 
+// Page CSS: the sheet is forced to fit exactly ONE A4 page when printing.
 const pageCss = (landscape) => `
-@page { size: A4 ${landscape ? "landscape" : "portrait"}; margin: 12mm; }
+@page { size: A4 ${landscape ? "landscape" : "portrait"}; margin: 10mm; }
 @media print {
-  html, body { background: white !important; }
+  html, body { background: white !important; margin: 0 !important; padding: 0 !important; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .no-print { display: none !important; }
-  .print-page { box-shadow: none !important; border: none !important; margin: 0 !important; }
+  .print-page {
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    page-break-after: avoid;
+    page-break-inside: avoid;
+  }
+  .print-page table { page-break-inside: avoid; }
+  .print-page tr { page-break-inside: avoid; }
+  .print-page thead { display: table-header-group; }
 }
 `;
-
-const thStyle = (extra = {}) => ({
-  border: "1px solid #555",
-  padding: "5px 6px",
-  fontSize: "10px",
-  fontWeight: "bold",
-  textAlign: "center",
-  verticalAlign: "middle",
-  backgroundColor: "#000",
-  color: "#fff",
-  ...extra,
-});
-
-const tdStyle = (extra = {}) => ({
-  border: "1px solid #ccc",
-  padding: "5px 6px",
-  fontSize: "10px",
-  verticalAlign: "middle",
-  ...extra,
-});
 
 export default function SalarySheetPage() {
   const router = useRouter();
@@ -460,6 +826,35 @@ export default function SalarySheetPage() {
   const { month, year } = data;
   const row = rows[0] || {};
 
+  // ─── Auto-compact sizing so more rows still fit on one page ───────────────
+  const n = rows.length;
+  const compact = !isReceipt && n > 14;
+  const veryCompact = !isReceipt && n > 22;
+  const cellPad = isReceipt ? "7px 8px" : veryCompact ? "2px 4px" : compact ? "3px 5px" : "4px 6px";
+  const cellFont = veryCompact ? "8px" : compact ? "9px" : "10px";
+
+  const thStyle = (extra = {}) => ({
+    border: "1px solid #555",
+    padding: isReceipt ? "6px 8px" : veryCompact ? "3px 3px" : "4px 4px",
+    fontSize: isReceipt ? "11px" : veryCompact ? "8px" : "9px",
+    fontWeight: "bold",
+    textAlign: "center",
+    verticalAlign: "middle",
+    backgroundColor: "#000",
+    color: "#fff",
+    lineHeight: 1.2,
+    ...extra,
+  });
+
+  const tdStyle = (extra = {}) => ({
+    border: "1px solid #ccc",
+    padding: cellPad,
+    fontSize: cellFont,
+    verticalAlign: "middle",
+    lineHeight: 1.25,
+    ...extra,
+  });
+
   const handleDownload = async () => {
     try {
       const response = await fetch(
@@ -501,7 +896,7 @@ export default function SalarySheetPage() {
           </button>
           <span className="text-gray-300">|</span>
           <h1 className="text-gray-800 font-semibold">
-            {isReceipt ? "Salary Receipt" : "Salary Sheet"} — {month} {year}
+            {isReceipt ? "Salary Receipt" : "Salary Report"} — {month} {year}
           </h1>
         </div>
         <div className="flex gap-2">
@@ -530,7 +925,7 @@ export default function SalarySheetPage() {
           Preview below •{" "}
           {isReceipt
             ? 'Click "Print Receipt" to print in A4 portrait'
-            : 'Click "Print / Save PDF" to export in A4 landscape'}
+            : 'Click "Print / Save PDF" to export in A4 landscape (fits one page)'}
         </p>
       </div>
 
@@ -538,31 +933,51 @@ export default function SalarySheetPage() {
       <main
         className="print-page mx-auto bg-white text-black shadow-xl rounded-lg overflow-hidden"
         style={{
-          width: isReceipt ? "190mm" : "277mm",
+          boxSizing: "border-box",
+          // Screen preview = full A4 width incl. 10mm margins; print uses 100% of the printable area
+          width: isReceipt ? "210mm" : "297mm",
           minHeight: isReceipt ? "200mm" : "190mm",
-          padding: "14mm",
+          padding: "10mm",
           fontFamily: "'Times New Roman', Times, 'Noto Sans Devanagari', serif",
           fontSize: "11px",
         }}
       >
-        {/* Header */}
-        <div style={{ textAlign: "center", marginBottom: "12px" }}>
+        {/* ─── Heading ─── */}
+        <div style={{ textAlign: "center", marginBottom: isReceipt ? "14px" : "8px" }}>
           <div
             style={{
-              fontSize: "15px",
+              fontSize: isReceipt ? "20px" : "19px",
               fontWeight: "bold",
-              letterSpacing: "1px",
-              borderBottom: "2px solid #000",
-              paddingBottom: "4px",
-              display: "inline-block",
-              minWidth: "400px",
+              letterSpacing: "0.5px",
+              lineHeight: 1.2,
             }}
           >
-            {isReceipt ? "SALARY RECEIPT" : "SALARY SHEET"}
+            {ORG_NAME}
           </div>
-          <div style={{ fontSize: "12px", marginTop: "4px", color: "#333" }}>
-            Month: <strong>{month} {year}</strong>
+          <div style={{ fontSize: "12px", marginTop: "2px", lineHeight: 1.3 }}>
+            {ORG_ADDRESS}
           </div>
+          <div style={{ fontSize: "12px", lineHeight: 1.3 }}>{ORG_TEL}</div>
+
+          <div
+            style={{
+              marginTop: "6px",
+              paddingTop: "4px",
+              borderTop: "2px solid #000",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "baseline",
+              gap: "14px",
+            }}
+          >
+            <span style={{ fontSize: "14px", fontWeight: "bold", letterSpacing: "1px" }}>
+              {isReceipt ? "Salary Receipt" : "Salary Report"}
+            </span>
+            <span style={{ fontSize: "12px" }}>
+              Period: <strong>{month} {year}</strong>
+            </span>
+          </div>
+          <div style={{ borderBottom: "1px solid #000", marginTop: "4px" }} />
         </div>
 
         {isReceipt ? (
@@ -585,20 +1000,19 @@ export default function SalarySheetPage() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr>
-                  <th style={thStyle({ textAlign: "left", fontSize: "11px" })}>Description</th>
-                  <th style={thStyle({ textAlign: "right", fontSize: "11px", width: "150px" })}>Amount</th>
+                  <th style={thStyle({ textAlign: "left" })}>Description</th>
+                  <th style={thStyle({ textAlign: "right", width: "150px" })}>Amount</th>
                 </tr>
               </thead>
               <tbody>
                 {COLUMNS.map((col, i) => (
                   <tr key={col.label} style={{ backgroundColor: i % 2 === 0 ? "#fff" : "#f9f9f9" }}>
-                    <td style={tdStyle({ fontSize: "12px", padding: "7px 8px", fontWeight: col.strong ? "bold" : "normal" })}>
+                    <td style={tdStyle({ fontSize: "12px", fontWeight: col.strong ? "bold" : "normal" })}>
                       {col.label}
                     </td>
                     <td
                       style={tdStyle({
                         fontSize: "12px",
-                        padding: "7px 8px",
                         textAlign: "right",
                         fontWeight: "bold",
                         backgroundColor: col.strong ? "#fffbea" : undefined,
@@ -612,16 +1026,33 @@ export default function SalarySheetPage() {
             </table>
           </>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "6px" }}>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              tableLayout: "fixed",
+            }}
+          >
+            <colgroup>
+              <col style={{ width: "26px" }} />
+              <col style={{ width: "115px" }} />
+              <col style={{ width: "80px" }} />
+              {COLUMNS.map((col) => (
+                <col key={col.label} />
+              ))}
+              <col style={{ width: "62px" }} />
+            </colgroup>
             <thead>
               <tr>
-                <th style={thStyle({ width: "28px" })}>S.N.</th>
-                <th style={thStyle({ width: "130px", textAlign: "left" })}>Name</th>
-                <th style={thStyle({ width: "90px", textAlign: "left" })}>Designation</th>
+                <th style={thStyle()}>S.N.</th>
+                <th style={thStyle({ textAlign: "left" })}>Name</th>
+                <th style={thStyle({ textAlign: "left" })}>Designation</th>
                 {COLUMNS.map((col) => (
-                  <th key={col.label} style={thStyle({ textAlign: "right" })}>{col.label}</th>
+                  <th key={col.label} style={thStyle({ textAlign: "right" })}>
+                    {col.label}
+                  </th>
                 ))}
-                <th style={thStyle({ width: "70px" })}>Signature</th>
+                <th style={thStyle()}>Signature</th>
               </tr>
             </thead>
             <tbody>
@@ -631,8 +1062,8 @@ export default function SalarySheetPage() {
                   style={{ backgroundColor: idx % 2 === 0 ? "#fff" : "#f9f9f9" }}
                 >
                   <td style={tdStyle({ textAlign: "center" })}>{idx + 1}</td>
-                  <td style={tdStyle()}>{item.name}</td>
-                  <td style={tdStyle()}>{item.role}</td>
+                  <td style={tdStyle({ wordBreak: "break-word" })}>{item.name}</td>
+                  <td style={tdStyle({ wordBreak: "break-word" })}>{item.role}</td>
                   {COLUMNS.map((col) => (
                     <td
                       key={col.label}
@@ -670,10 +1101,18 @@ export default function SalarySheetPage() {
           </table>
         )}
 
-        {/* Footer */}
-        <div style={{ marginTop: "28px", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+        {/* ─── Footer ─── */}
+        <div
+          style={{
+            marginTop: isReceipt ? "28px" : veryCompact ? "10px" : "16px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-end",
+            pageBreakInside: "avoid",
+          }}
+        >
           <div style={{ textAlign: "left" }}>
-            <div style={{ width: "160px", borderTop: "1px solid #000", paddingTop: "4px", marginTop: "30px" }}>
+            <div style={{ width: "160px", borderTop: "1px solid #000", paddingTop: "4px", marginTop: veryCompact ? "14px" : "24px" }}>
               <div style={{ fontSize: "11px", fontWeight: "bold" }}>Prepared by</div>
               <div style={{ fontSize: "11px" }}>{PREPARED_BY}</div>
             </div>
@@ -682,7 +1121,7 @@ export default function SalarySheetPage() {
             Date: {month} {year}
           </div>
           <div style={{ textAlign: "right" }}>
-            <div style={{ width: "160px", borderTop: "1px solid #000", paddingTop: "4px", marginTop: "30px", marginLeft: "auto" }}>
+            <div style={{ width: "160px", borderTop: "1px solid #000", paddingTop: "4px", marginTop: veryCompact ? "14px" : "24px", marginLeft: "auto" }}>
               <div style={{ fontSize: "11px", fontWeight: "bold" }}>Approved by</div>
               <div style={{ fontSize: "11px" }}>{APPROVED_BY}</div>
             </div>
